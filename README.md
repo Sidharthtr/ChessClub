@@ -3,8 +3,8 @@
 
 Tech Stack Used
 -
-.Typescript
-.Websocket
-.NodeJs
-.ReactJs
-.ChessJs(buildin package)
+.Typescript<br/>
+.Websocket<br/>
+.NodeJs<br/>
+.ReactJs<br/>
+.ChessJs(buildin package)<br/>
