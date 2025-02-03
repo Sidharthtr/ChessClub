@@ -9,7 +9,7 @@ function App() {
 
   return (
     <>
-    <div className='h-screen bg-slate-950 p-4'>
+    <div className='h-screen w-full bg-slate-950'>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing/>}/>

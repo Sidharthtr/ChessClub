@@ -10,10 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "chess.js": "^1.0.0-beta.8",
+    "chess.js": "^1.0.0",
     "react": "^18.2.0",
+    "react-confetti": "^6.2.2",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.23.1"
+    "react-router-dom": "^6.28.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
