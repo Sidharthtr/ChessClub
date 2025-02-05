@@ -80,6 +80,7 @@ export class Game {
           payload: move,
         })
       );
+      console.log("Move sent to player 2");
     } else {
       this.player1.send(
         JSON.stringify({
@@ -87,6 +88,7 @@ export class Game {
           payload: move,
         })
       );
+      console.log("Move sent to player 1");
     }
     this.moveCount++;
   }
