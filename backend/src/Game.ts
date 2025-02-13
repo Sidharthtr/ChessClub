@@ -1,6 +1,6 @@
 import { Chess } from "chess.js";
 import WebSocket from "ws";
-import { GAME_OVER, INIT_GAME, MOVE } from "./message";
+import { GAME_ALERT, GAME_OVER, INIT_GAME, MOVE } from "./message";
 
 export class Game {
   public player1: WebSocket;
@@ -42,54 +42,61 @@ export class Game {
       to: string;
     }
   ) {
-    if (this.moveCount === 0 && socket != this.player1) {
-      return;
-    }
-    if (this.moveCount === 1 && socket != this.player2) {
-      return;
-    }
+        if (this.moveCount%2 === 0 && socket != this.player1) {
+          socket.send(JSON.stringify({type: GAME_ALERT, payload: "not your turn"}))
+          return;
+        }
+        if (this.moveCount%2 === 1 && socket != this.player2) {
+          socket.send(JSON.stringify({type: GAME_ALERT, payload: "not your turn"}))
+          return;
+        }
 
-    try {
-      this.board.move(move);
-    } catch (e) {
-      console.log(e);
-      return;
-    }
-    if (this.board.isGameOver()) {
-      this.player1.emit(
-        JSON.stringify({
-          type: GAME_OVER,
-          payload: {
-            winner: this.board.turn() === "w" ? "black" : "white",
-          },
-        })
-      );
-      this.player2.emit(
-        JSON.stringify({
-          type: GAME_OVER,
-          payload: {
-            winner: this.board.turn() === "w" ? "black" : "white",
-          },
-        })
-      );
-    }
-    if (this.moveCount % 2 === 0) {
-      this.player2.send(
-        JSON.stringify({
-          type: MOVE,
-          payload: move,
-        })
-      );
-      console.log("Move sent to player 2");
-    } else {
-      this.player1.send(
-        JSON.stringify({
-          type: MOVE,
-          payload: move,
-        })
-      );
-      console.log("Move sent to player 1");
-    }
-    this.moveCount++;
-  }
-}
+        try {
+            this.board.move(move);
+          } catch (e) {
+            console.log(e);
+            return;
+        }
+
+        this.player2.send(
+          JSON.stringify({
+            type: MOVE,
+            payload: move,
+          })
+        );
+        
+      
+        this.player1.send(
+          JSON.stringify({
+            type: MOVE,
+            payload: move,
+          })
+        );
+        
+        if (this.board.isGameOver()) {
+          console.log("game over in server")
+          this.player1.send(
+            JSON.stringify({
+              type: GAME_OVER,
+              payload: {
+                winner: this.board.turn() === "w" ? "black" : "white",
+              },
+            })
+          );
+          this.player2.send(
+            JSON.stringify({
+              type: GAME_OVER,
+              payload: {
+                winner: this.board.turn() === "w" ? "black" : "white",
+              },
+            })
+          );
+      }
+    
+      
+      this.moveCount++;
+   }
+    
+   
+  };
+
