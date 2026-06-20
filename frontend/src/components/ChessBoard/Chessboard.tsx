@@ -1,73 +1,69 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Chess, Square } from 'chess.js';
 import ChessSquare from './ChessSquare';
 import Confetti from 'react-confetti';
 import { RootState } from '../../redux/store';
-import { gameMove, setSelectedSquare, setGameOver } from '../../redux/gameSlice';
-import { GAME_OVER, MOVE } from '../message';
+import { setSelectedSquare } from '../../redux/gameSlice';
+import { MessageType } from '../../shared/constants/messageTypes';
 import BetterLuckSign from '../Constants/betterLuckNextTime';
 
-const ChessBoard: React.FC<{ socket?: WebSocket | null ,win:boolean}> = ({ socket ,win}) => {
+const ChessBoard: React.FC<{ socket?: WebSocket | null }> = ({ socket }) => {
   const dispatch = useDispatch();
-  const fen = useSelector((state: RootState) => state.game.fen);
-  const selectedSquare = useSelector((state: RootState) => state.game.selectedSquare);
-  const gameOver = useSelector((state: RootState) => state.game.gameOver);
+  const { fen, selectedSquare, gameOver, colour, winner } = useSelector(
+    (state: RootState) => state.game
+  );
   const boxSize = 80;
 
-  const game = new Chess(fen);  // Create Chess instance from the current FEN
+  const game = new Chess(fen);
+  const isMyTurn = colour === (game.turn() === 'w' ? 'white' : 'black');
+  const isWinner = gameOver && winner === colour;
+  const isDraw = gameOver && winner === null;
 
-  const makeMove = (move: { from: string, to: string }) => {
-    if (socket) {
-      // Send the move to the backend
-      socket.send(JSON.stringify({
-        type: MOVE,
-        move: move
-      }));
+  const makeMove = (move: { from: string; to: string }) => {
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: MessageType.MOVE, move }));
     }
   };
 
   const handleSquareClick = (square: Square) => {
-    if (selectedSquare === square) {
-      // Unselect the square if it's already selected
-      dispatch(setSelectedSquare(null));
-    } else if (selectedSquare) {
-      // Attempt to make a move if a square is already selected
-      console.log(fen)
-      // dispatch(gameMove({ from: selectedSquare, to: square }));
-      makeMove({ from: selectedSquare, to: square });
+    if (gameOver) return;
+
+    if (selectedSquare) {
+      if (selectedSquare === square) {
+        dispatch(setSelectedSquare(null));
+        return;
+      }
+      if (isMyTurn) makeMove({ from: selectedSquare, to: square });
       dispatch(setSelectedSquare(null));
     } else {
-      // Select a square
+      if (!isMyTurn) return;
+      const piece = game.get(square);
+      if (!piece || piece.color !== (colour === 'white' ? 'w' : 'b')) return;
       dispatch(setSelectedSquare(square));
     }
   };
-
-  // Reset game after it's over
-  // useEffect(() => {
-  //   if (gameOver) {
-  //     setTimeout(() => {
-  //       dispatch(setGameOver(false));
-  //     }, 5000);
-  //   }
-  // }, [gameOver, dispatch]);
 
   const renderBoard = () => {
     return game.board().map((row, i) => (
       <div className="flex" key={i}>
         {row.map((square, j) => {
-          const squareRepresentation = `${String.fromCharCode(97 + j)}${8 - i}`;
+          const squareId = `${String.fromCharCode(97 + j)}${8 - i}`;
           return (
             <div
               key={j}
-              onClick={() => handleSquareClick(squareRepresentation as Square)}
+              onClick={() => handleSquareClick(squareId as Square)}
               style={{
                 width: boxSize,
                 height: boxSize,
-                backgroundColor: selectedSquare === squareRepresentation ? 'black' :
-                  ((i + j) % 2 === 0 ? '#f0d9b5' : '#417519'),
+                backgroundColor:
+                  selectedSquare === squareId
+                    ? '#aaa23a'
+                    : (i + j) % 2 === 0
+                    ? '#f0d9b5'
+                    : '#b58863',
               }}
-              className="square relative flex justify-center items-center"
+              className="square relative flex justify-center items-center cursor-pointer"
             >
               <ChessSquare square={square} />
             </div>
@@ -78,9 +74,9 @@ const ChessBoard: React.FC<{ socket?: WebSocket | null ,win:boolean}> = ({ socke
   };
 
   return (
-    <div className="chess-board inline-block mt-12 border-2 border-black">
-      {(gameOver && win)? <Confetti />:null}
-      {(gameOver && !win)?<BetterLuckSign/>:null}
+    <div className="chess-board inline-block border-2 border-gray-700 shadow-2xl">
+      {isWinner && !isDraw && <Confetti />}
+      {gameOver && !isWinner && !isDraw && <BetterLuckSign />}
       {renderBoard()}
     </div>
   );

@@ -1,12 +1,22 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { Chess } from 'chess.js';
 
+type Color = 'white' | 'black' | null;
+
 interface GameState {
-  fen: string;  // Store only the FEN string
+  fen: string;
   selectedSquare: string | null;
   gameStarted: boolean;
+  isWaiting: boolean;
   gameOver: boolean;
-  colour:string | null
+  gameOverReason: string | null;
+  winner: string | null;
+  colour: Color;
+  opponentUsername: string | null;
+  pendingDrawRequest: boolean;
+  pendingTakebackRequest: boolean;
+  clockWhiteMs: number | null;
+  clockBlackMs: number | null;
 }
 
 interface Move {
@@ -15,11 +25,19 @@ interface Move {
 }
 
 const initialState: GameState = {
-  fen: new Chess().fen(),  // Start with the initial FEN
+  fen: new Chess().fen(),
   selectedSquare: null,
   gameStarted: false,
+  isWaiting: false,
   gameOver: false,
-  colour: ''
+  gameOverReason: null,
+  winner: null,
+  colour: null,
+  opponentUsername: null,
+  pendingDrawRequest: false,
+  pendingTakebackRequest: false,
+  clockWhiteMs: null,
+  clockBlackMs: null,
 };
 
 const gameSlice = createSlice({
@@ -27,47 +45,83 @@ const gameSlice = createSlice({
   initialState,
   reducers: {
     setFen(state, action: PayloadAction<string>) {
-      state.fen = action.payload;  // Store the FEN string
+      state.fen = action.payload;
     },
     setSelectedSquare(state, action: PayloadAction<string | null>) {
       state.selectedSquare = action.payload;
     },
+    setWaiting(state, action: PayloadAction<boolean>) {
+      state.isWaiting = action.payload;
+    },
     setStartGame(state, action: PayloadAction<boolean>) {
       state.gameStarted = action.payload;
+      if (action.payload) state.isWaiting = false;
     },
-    setGameOver(state, action: PayloadAction<boolean>) {
-      state.gameOver = action.payload;
+    setGameOver(state, action: PayloadAction<{ winner: string | null; reason: string }>) {
+      state.gameOver = true;
+      state.winner = action.payload.winner;
+      state.gameOverReason = action.payload.reason;
     },
-    setColour(state, action: PayloadAction<string>) {
-      state.colour = action.payload
+    setColour(state, action: PayloadAction<Color>) {
+      state.colour = action.payload;
+    },
+    setOpponentUsername(state, action: PayloadAction<string | null>) {
+      state.opponentUsername = action.payload;
+    },
+    setClock(state, action: PayloadAction<{ white: number; black: number }>) {
+      state.clockWhiteMs = action.payload.white;
+      state.clockBlackMs = action.payload.black;
+    },
+    setPendingDraw(state, action: PayloadAction<boolean>) {
+      state.pendingDrawRequest = action.payload;
+    },
+    setPendingTakeback(state, action: PayloadAction<boolean>) {
+      state.pendingTakebackRequest = action.payload;
+    },
+    setFenFromServer(state, action: PayloadAction<string>) {
+      state.fen = action.payload;
     },
     resetGame(state) {
-      state.fen = new Chess().fen();  // Reset to the starting FEN
+      state.fen = new Chess().fen();
       state.selectedSquare = null;
       state.gameStarted = false;
+      state.isWaiting = false;
       state.gameOver = false;
+      state.gameOverReason = null;
+      state.winner = null;
+      state.colour = null;
+      state.opponentUsername = null;
+      state.pendingDrawRequest = false;
+      state.pendingTakebackRequest = false;
+      state.clockWhiteMs = null;
+      state.clockBlackMs = null;
     },
-    // Action to make a move and update the FEN
     gameMove(state, action: PayloadAction<Move>) {
-      const chess = new Chess(state.fen);  // Recreate the Chess object from FEN
-      const moveResult = chess.move(action.payload);  // Make the move
-     
+      const chess = new Chess(state.fen);
+      const moveResult = chess.move(action.payload);
       if (moveResult) {
-        state.fen = chess.fen();  // Update the FEN after the move
-        
-        // console.log(moveResult)
-        // Optionally, check if the game is over
-        // if (chess.game_over()) {
-        //   state.gameOver = true;
-        // }
+        state.fen = chess.fen();
       } else {
-        // Handle invalid move case (optional)
-        // You might want to dispatch an error message or some other action
-        console.error('Invalid move attempted:', action.payload);
+        console.error('Invalid move from server:', action.payload);
       }
     },
   },
 });
 
-export const { setFen, setSelectedSquare, setStartGame, setGameOver, resetGame, gameMove,setColour } = gameSlice.actions;
+export const {
+  setFen,
+  setSelectedSquare,
+  setWaiting,
+  setStartGame,
+  setGameOver,
+  setColour,
+  setOpponentUsername,
+  setClock,
+  setPendingDraw,
+  setPendingTakeback,
+  setFenFromServer,
+  resetGame,
+  gameMove,
+} = gameSlice.actions;
+
 export default gameSlice.reducer;

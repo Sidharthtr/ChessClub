@@ -1,0 +1,35 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  rating       Int      @default(1200)
+  createdAt    DateTime @default(now())
+
+  gamesAsWhite Game[] @relation("WhitePlayer")
+  gamesAsBlack Game[] @relation("BlackPlayer")
+}
+
+model Game {
+  id            String   @id @default(cuid())
+  whitePlayerId String?
+  blackPlayerId String?
+  whitePlayer   User?    @relation("WhitePlayer", fields: [whitePlayerId], references: [id])
+  blackPlayer   User?    @relation("BlackPlayer", fields: [blackPlayerId], references: [id])
+  winner        String?
+  reason        String
+  pgn           String
+  finalFen      String
+  timeControlMs Int
+  startedAt     DateTime
+  endedAt       DateTime @default(now())
+}

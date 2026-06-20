@@ -1,33 +1,24 @@
 import { useEffect, useState } from 'react';
+import { useSelector } from 'react-redux';
+import { RootState } from '../redux/store';
 
-const WS_URL =  'ws://localhost:8080';
+const WS_BASE = 'ws://localhost:8080';
 
 export const useSocket = () => {
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const token = useSelector((state: RootState) => state.auth.token);
 
   useEffect(() => {
-    // Create WebSocket connection
-    const ws = new WebSocket(WS_URL);
+    const url = token ? `${WS_BASE}?token=${encodeURIComponent(token)}` : WS_BASE;
+    const ws = new WebSocket(url);
 
-    // When WebSocket connection is open, set the socket state
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      setSocket(ws);
-    };
+    ws.onopen = () => setSocket(ws);
+    ws.onclose = () => setSocket(null);
 
-    // Handle WebSocket closure
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setSocket(null);
-    };
-
-    // Cleanup WebSocket on component unmount
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
+      ws.close();
     };
-  }, []);
+  }, [token]); // reconnect whenever the auth token changes
 
   return socket;
 };
