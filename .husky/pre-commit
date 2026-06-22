@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# 1. Lint and format all staged files
+npx lint-staged
+
+# 2. Full typecheck on both workspaces
+# Runs after lint-staged so any auto-fixes are reflected before type checking
+npm run typecheck --prefix backend
+npm run typecheck --prefix frontend

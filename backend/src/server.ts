@@ -10,7 +10,7 @@ import { historyRouter } from './modules/history/historyRouter';
 
 const app = express();
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(express.json());
 
 app.use('/api/auth', authRouter);
@@ -21,7 +21,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 const httpServer = http.createServer(app);
-const wss = new WebSocketServer({ server: httpServer });
+// path: '/ws' means the server only accepts WS upgrades at ws://host/ws
+// This lets nginx proxy /ws cleanly without conflicting with static file serving.
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 const socketManager = new SocketManager();
 
 wss.on('connection', (ws, req) => {

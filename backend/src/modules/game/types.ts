@@ -1,4 +1,4 @@
-import { WebSocket } from "ws";
+import type { WebSocket } from 'ws';
 
 export interface Player {
   id: string;
@@ -6,7 +6,7 @@ export interface Player {
   username?: string;
 }
 
-export type Color = "white" | "black";
+export type Color = 'white' | 'black';
 
 export interface MovePayload {
   from: string;

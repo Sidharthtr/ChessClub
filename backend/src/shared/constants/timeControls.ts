@@ -1,9 +1,18 @@
-export const TIME_CONTROLS = {
-  BULLET: 60_000,         // 1 min
-  BLITZ_3: 180_000,       // 3 min
-  BLITZ_5: 300_000,       // 5 min
-  RAPID: 600_000,         // 10 min
-  CLASSICAL: 1_800_000,   // 30 min
-} as const;
+export interface TimeControl {
+  label: string;
+  baseMs: number;
+  incrementMs: number;
+}
 
-export type TimeControlKey = keyof typeof TIME_CONTROLS;
+export const TIME_CONTROLS: TimeControl[] = [
+  { label: '10+0', baseMs: 600_000, incrementMs: 0 },
+  { label: '10+5', baseMs: 600_000, incrementMs: 5_000 },
+  { label: '15+10', baseMs: 900_000, incrementMs: 10_000 },
+];
+
+export const DEFAULT_TIME_CONTROL = TIME_CONTROLS[0];
+
+/** Stable string key used as matchmaking queue bucket. */
+export function tcKey(baseMs: number, incrementMs: number): string {
+  return `${baseMs}_${incrementMs}`;
+}

@@ -11,6 +11,12 @@ export const MessageType = {
   TAKEBACK_REQUEST: 'takeback_request',
   TAKEBACK_ACCEPT: 'takeback_accept',
   TAKEBACK_REJECT: 'takeback_reject',
+  // Phase 4
+  GAME_RESUME: 'game_resume',
+  REMATCH_REQUEST: 'rematch_request',
+  REMATCH_ACCEPT: 'rematch_accept',
+  REMATCH_REJECT: 'rematch_reject',
+  RATING_UPDATE: 'rating_update',
 } as const;
 
-export type MessageTypeValue = typeof MessageType[keyof typeof MessageType];
+export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];

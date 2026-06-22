@@ -5,6 +5,7 @@
 ---
 
 ## ✅ Phase 0 — Fix Existing Bugs
+
 **Goal**: Get existing code to compile and run end-to-end.
 
 - [x] Fixed `MessageType` enum import mismatch in `Game.ts` and `SocketManager.ts`
@@ -18,6 +19,7 @@
 ---
 
 ## ✅ Phase 1 — Input Validation + Logging
+
 **Goal**: Production-grade message handling — no crashes on bad input.
 
 - [x] Installed `zod`, `pino`, `pino-pretty`, `dotenv`
@@ -35,9 +37,11 @@
 ---
 
 ## 🔄 Phase 2 — Core Chess Features
+
 **Goal**: Feels like a real chess app.
 
 ### Backend
+
 - [x] `shared/constants/timeControls.ts` — BULLET, BLITZ_3, BLITZ_5, RAPID, CLASSICAL constants
 - [x] `modules/game/chess-clock.ts` — server-authoritative clock with `start()`, `recordMove()`, `undoMove()`, `stop()`, `getSnapshot()`
 - [x] `Game.ts` — integrated chess clock; game ends with `reason` field (checkmate, stalemate, draws, timeout)
@@ -45,9 +49,10 @@
 - [x] `Game.ts` — `requestDraw / acceptDraw / rejectDraw` request flow
 - [x] `Game.ts` — `requestTakeback / acceptTakeback / rejectTakeback` flow with `board.undo()`
 - [x] Clock snapshot `{ white, black }` sent with every MOVE broadcast
-- [x] `SocketManager.ts` — routes RESIGN, DRAW_*, TAKEBACK_* to Game methods
+- [x] `SocketManager.ts` — routes RESIGN, DRAW*\*, TAKEBACK*\* to Game methods
 
 ### Frontend
+
 - [x] `src/shared/constants/messageTypes.ts` — mirrors backend enum (replaces `components/message.ts`)
 - [x] `src/redux/gameSlice.ts` — added `winner`, `gameOverReason`, `pendingDrawRequest`, `pendingTakebackRequest`
 - [x] `src/screens/Game.tsx` — handles DRAW_REQUEST, TAKEBACK_REQUEST, TAKEBACK_ACCEPT, DRAW_REJECT, TAKEBACK_REJECT
@@ -56,6 +61,7 @@
 - [x] Deleted deprecated `src/components/message.ts`
 
 ### Bug fixes (post-Phase 2)
+
 - [x] Time control mismatch — frontend now sends `timeControlMs` in INIT_GAME; schema + matchmaking accept it
 - [x] Game auto-cleanup via `onEnd` callback — stale entries removed, "can't move after restart" fixed
 - [x] Disconnect notifies opponent — `SocketManager.removeUser` calls `game.resign(socket)`
@@ -70,6 +76,7 @@
 ---
 
 ## ✅ Phase 3 — Persistence + Auth
+
 **Goal**: Users have persistent identity; games are stored in a database.
 
 - [x] Install Prisma (v5, SQLite for dev — swap `provider` to `postgresql` for prod)
@@ -96,21 +103,35 @@
 
 ---
 
-## ⏳ Phase 4 — Smart Matchmaking + Reconnection
+## ✅ Phase 4 — Smart Matchmaking + Reconnection
+
 **Goal**: Production-quality matchmaking; no more lost games on disconnect.
 
-- [ ] Elo rating calculation (after each game result)
-- [ ] Rating-based matchmaking queue — per time control, expanding ±window over time
-- [ ] Reconnection: 30s grace period — server holds game state, client reconnects with gameId + JWT
-- [ ] Rematch flow — either player can request after game ends
-- [ ] Frontend: Lobby screen with time control selector
-- [ ] Frontend: reconnection logic in `useSocket.ts`
+- [x] `modules/rating/EloService.ts` — K-factor Elo (K=40/<30g, K=20/<100g, K=10/stable), min rating 100
+- [x] Prisma migration `add_games_count` — `gamesCount Int @default(0)` on User for K-factor
+- [x] `HistoryService.saveGame()` — calculates + saves Elo deltas after each rated game; returns `{ ratingUpdates }`
+- [x] `Game.ts` — sends `RATING_UPDATE` to each player after DB save; `safeSend()` guards on closed sockets
+- [x] `MatchmakingService.ts` — multi-player rated queue per time control; window starts at ±100, expands ±50 every 10 s up to ±500; random colour assignment; self-match prevention
+- [x] `SocketManager.handleInitGameAsync()` — fetches current rating from DB before enqueuing
+- [x] `Game.ts` — `replaceSocket(userId, newSocket)`, `getResumePayload(userId)` → `GAME_RESUME` message
+- [x] `GameService.findGameByUserId(userId)` — finds active game for reconnecting user
+- [x] `SocketManager.addUser()` — auto-resumes active game on reconnect; clears grace timer
+- [x] `SocketManager.removeUser()` — 30 s grace period for authenticated players; opponent alerted; anonymous → resign immediately
+- [x] `Game.ts` — `requestRematch / acceptRematch / rejectRematch`; colors swapped on rematch
+- [x] `GameService.createGame()` — wires `onRematch` callback so rematch creates a new game via same service
+- [x] `message.schema.ts` — Zod schemas for `REMATCH_REQUEST / ACCEPT / REJECT`
+- [x] `SocketManager` — routes `REMATCH_*` messages to Game methods
+- [x] Frontend `authSlice` — `updateRating(newRating)` action; syncs localStorage
+- [x] Frontend `gameSlice` — added `gameId`, `pendingRematchRequest`, `ratingChange` state
+- [x] Frontend `Game.tsx` — handles `GAME_RESUME` (full state restore), `RATING_UPDATE` (live rating in navbar), `REMATCH_*`; opponent-disconnected overlay on board; Rematch + New Game buttons in post-game panel; incoming rematch modal
+- [x] Both sides typecheck clean (`tsc --noEmit` passes with zero errors)
 
-**Test Gate**: Close browser tab mid-game, reopen — game resumes from correct position.
+**Test Gate**: ✅ Close browser tab mid-game, reopen — game resumes from correct position. After game ends, both players see updated rating. Rematch request flows correctly.
 
 ---
 
 ## ⏳ Phase 5 — Redis + Horizontal Scaling
+
 **Goal**: Multi-instance ready; stateless servers.
 
 - [ ] Move active game state to Redis (`game:{gameId}` → JSON)
@@ -123,6 +144,7 @@
 ---
 
 ## ⏳ Phase 6 — Spectators + Leaderboard
+
 **Goal**: Discovery and audience features.
 
 - [ ] Spectator mode — join any live game read-only
@@ -133,6 +155,7 @@
 ---
 
 ## ⏳ Phase 7 — Docker + Kubernetes
+
 **Goal**: Deployable, demonstrates production systems knowledge.
 
 - [ ] `backend/Dockerfile`
@@ -147,6 +170,7 @@
 ---
 
 ## ⏳ Phase 8 — Extract First Microservice (Optional)
+
 **Goal**: Real microservice boundary on resume.
 
 - [ ] Move `modules/matchmaking/` into its own repo / deployable

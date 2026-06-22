@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
-import { RootState } from '../redux/store';
+import type { RootState } from '../redux/store';
 
 interface GameRecord {
   id: string;
@@ -21,7 +21,11 @@ function formatTc(ms: number): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function resultLabel(game: GameRecord, myId: string): { label: string; color: string } {
@@ -42,8 +46,9 @@ const History = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.get('/auth/games')
-      .then(r => setGames(r.data))
+    api
+      .get('/auth/games')
+      .then((r) => setGames(r.data))
       .catch(() => setError('Failed to load game history.'))
       .finally(() => setLoading(false));
   }, []);
@@ -81,9 +86,7 @@ const History = () => {
       <div className="flex-1 p-8 max-w-4xl mx-auto w-full">
         <h1 className="text-2xl font-bold text-white mb-6">Game History</h1>
 
-        {loading && (
-          <div className="text-gray-500 text-center py-16">Loading…</div>
-        )}
+        {loading && <div className="text-gray-500 text-center py-16">Loading…</div>}
         {error && (
           <div className="bg-red-900/30 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
             {error}
@@ -115,7 +118,9 @@ const History = () => {
               </thead>
               <tbody>
                 {games.map((game, i) => {
-                  const res = authUser ? resultLabel(game, authUser.id) : { label: game.winner ?? 'Draw', color: 'text-gray-300' };
+                  const res = authUser
+                    ? resultLabel(game, authUser.id)
+                    : { label: game.winner ?? 'Draw', color: 'text-gray-300' };
                   return (
                     <tr
                       key={game.id}
@@ -124,9 +129,15 @@ const History = () => {
                       }`}
                     >
                       <td className={`px-5 py-3 font-bold ${res.color}`}>{res.label}</td>
-                      <td className="px-5 py-3 text-gray-300">{game.whitePlayer?.username ?? 'Anonymous'}</td>
-                      <td className="px-5 py-3 text-gray-300">{game.blackPlayer?.username ?? 'Anonymous'}</td>
-                      <td className="px-5 py-3 text-gray-500 capitalize">{game.reason.replace(/_/g, ' ')}</td>
+                      <td className="px-5 py-3 text-gray-300">
+                        {game.whitePlayer?.username ?? 'Anonymous'}
+                      </td>
+                      <td className="px-5 py-3 text-gray-300">
+                        {game.blackPlayer?.username ?? 'Anonymous'}
+                      </td>
+                      <td className="px-5 py-3 text-gray-500 capitalize">
+                        {game.reason.replace(/_/g, ' ')}
+                      </td>
                       <td className="px-5 py-3 text-gray-500">{formatTc(game.timeControlMs)}</td>
                       <td className="px-5 py-3 text-gray-500">{formatDate(game.endedAt)}</td>
                     </tr>

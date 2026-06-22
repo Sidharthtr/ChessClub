@@ -1,4 +1,5 @@
-import { useState, FormEvent } from 'react';
+import type { FormEvent } from 'react';
+import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
@@ -58,7 +59,7 @@ const Register = () => {
               minLength={3}
               maxLength={20}
               value={username}
-              onChange={e => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value)}
               className="bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:border-green-500 transition-colors"
               placeholder="e.g. magnus123"
             />
@@ -71,7 +72,7 @@ const Register = () => {
               type="email"
               required
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               className="bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:border-green-500 transition-colors"
               placeholder="you@example.com"
             />
@@ -84,7 +85,7 @@ const Register = () => {
               required
               minLength={6}
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
               className="bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:border-green-500 transition-colors"
               placeholder="Min. 6 characters"
             />

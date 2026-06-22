@@ -1,7 +1,9 @@
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { authService } from './AuthService';
-import { requireAuth, AuthRequest } from './authMiddleware';
+import type { AuthRequest } from './authMiddleware';
+import { requireAuth } from './authMiddleware';
 import { historyService } from '../history/HistoryService';
 import { AppError } from '../../shared/errors/AppError';
 import { logger } from '../../shared/utils/logger';
@@ -9,7 +11,11 @@ import { logger } from '../../shared/utils/logger';
 export const authRouter = Router();
 
 const RegisterSchema = z.object({
-  username: z.string().min(3).max(20).regex(/^[a-zA-Z0-9_]+$/),
+  username: z
+    .string()
+    .min(3)
+    .max(20)
+    .regex(/^[a-zA-Z0-9_]+$/),
   email: z.string().email(),
   password: z.string().min(6),
 });

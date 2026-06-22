@@ -1,11 +1,11 @@
 import { Chess } from 'chess.js';
 import WebSocket from 'ws';
 import { MessageType } from '../../shared/constants/messageTypes';
-import { MovePayload } from './types';
+import type { MovePayload } from './types';
 import { ChessClock } from './chess-clock';
 import { generateGameId } from '../../shared/utils/generateGameId';
 import { logger } from '../../shared/utils/logger';
-import { TIME_CONTROLS } from '../../shared/constants/timeControls';
+import { DEFAULT_TIME_CONTROL } from '../../shared/constants/timeControls';
 import { historyService } from '../history/HistoryService';
 
 type GameStatus = 'active' | 'over';
@@ -20,6 +20,16 @@ type GameOverReason =
   | 'resignation'
   | 'timeout';
 
+export type RematchCallback = (
+  white: WebSocket,
+  black: WebSocket,
+  whiteUserId: string | null,
+  blackUserId: string | null,
+  whiteUsername: string | null,
+  blackUsername: string | null,
+  incrementMs?: number,
+) => void;
+
 export class Game {
   public gameId: string;
   public player1: WebSocket; // white
@@ -29,21 +39,25 @@ export class Game {
   private whiteUsername: string | null;
   private blackUsername: string | null;
   private board: Chess;
-  private moves: string[];
   private startTime: Date;
   private timeControlMs: number;
+  private incrementMs: number;
   private moveCount = 0;
   private status: GameStatus = 'active';
   private clock: ChessClock;
   private pendingDrawFrom: WebSocket | null = null;
   private pendingTakebackFrom: WebSocket | null = null;
+  private pendingRematchFrom: WebSocket | null = null;
   private readonly onEnd?: () => void;
+  private readonly onRematch?: RematchCallback;
 
   constructor(
     player1: WebSocket,
     player2: WebSocket,
-    timeControlMs: number = TIME_CONTROLS.RAPID,
+    timeControlMs: number = DEFAULT_TIME_CONTROL.baseMs,
+    incrementMs = 0,
     onEnd?: () => void,
+    onRematch?: RematchCallback,
     whiteUserId: string | null = null,
     blackUserId: string | null = null,
     whiteUsername: string | null = null,
@@ -57,26 +71,45 @@ export class Game {
     this.whiteUsername = whiteUsername;
     this.blackUsername = blackUsername;
     this.board = new Chess();
-    this.moves = [];
     this.startTime = new Date();
     this.timeControlMs = timeControlMs;
+    this.incrementMs = incrementMs;
     this.onEnd = onEnd;
+    this.onRematch = onRematch;
 
-    this.clock = new ChessClock(timeControlMs, (loser) => {
-      this.endGame(loser === 'white' ? 'black' : 'white', 'timeout');
-    });
-
-    this.player1.send(
-      JSON.stringify({
-        type: MessageType.INIT_GAME,
-        payload: { color: 'white', gameId: this.gameId, timeMs: timeControlMs, opponentUsername: blackUsername },
-      })
+    this.clock = new ChessClock(
+      timeControlMs,
+      (loser) => {
+        this.endGame(loser === 'white' ? 'black' : 'white', 'timeout');
+      },
+      incrementMs,
     );
-    this.player2.send(
+
+    this.safeSend(
+      this.player1,
       JSON.stringify({
         type: MessageType.INIT_GAME,
-        payload: { color: 'black', gameId: this.gameId, timeMs: timeControlMs, opponentUsername: whiteUsername },
-      })
+        payload: {
+          color: 'white',
+          gameId: this.gameId,
+          timeMs: timeControlMs,
+          incrementMs,
+          opponentUsername: blackUsername,
+        },
+      }),
+    );
+    this.safeSend(
+      this.player2,
+      JSON.stringify({
+        type: MessageType.INIT_GAME,
+        payload: {
+          color: 'black',
+          gameId: this.gameId,
+          timeMs: timeControlMs,
+          incrementMs,
+          opponentUsername: whiteUsername,
+        },
+      }),
     );
 
     this.clock.start();
@@ -87,11 +120,17 @@ export class Game {
     if (this.status === 'over') return;
 
     if (this.moveCount % 2 === 0 && socket !== this.player1) {
-      socket.send(JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'not your turn' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'not your turn' }),
+      );
       return;
     }
     if (this.moveCount % 2 === 1 && socket !== this.player2) {
-      socket.send(JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'not your turn' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'not your turn' }),
+      );
       return;
     }
 
@@ -99,7 +138,10 @@ export class Game {
       this.board.move(move);
     } catch (e) {
       logger.warn({ gameId: this.gameId, move, error: e }, 'invalid_move');
-      socket.send(JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'invalid move' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'invalid move' }),
+      );
       return;
     }
 
@@ -111,16 +153,15 @@ export class Game {
       type: MessageType.MOVE,
       payload: { move, clock: clockSnapshot },
     });
-    this.player1.send(movePayload);
-    this.player2.send(movePayload);
+    this.safeSend(this.player1, movePayload);
+    this.safeSend(this.player2, movePayload);
 
     logger.info({ gameId: this.gameId, move, moveCount: this.moveCount }, 'move_made');
 
     if (this.board.isGameOver()) {
       const reason = this.getGameOverReason();
-      const winner = reason === 'checkmate'
-        ? (this.board.turn() === 'w' ? 'black' : 'white')
-        : null;
+      const winner =
+        reason === 'checkmate' ? (this.board.turn() === 'w' ? 'black' : 'white') : null;
       this.endGame(winner, reason);
     }
   }
@@ -141,7 +182,7 @@ export class Game {
       return;
     }
     this.pendingDrawFrom = socket;
-    opponent.send(JSON.stringify({ type: MessageType.DRAW_REQUEST }));
+    this.safeSend(opponent, JSON.stringify({ type: MessageType.DRAW_REQUEST }));
     logger.info({ gameId: this.gameId }, 'draw_requested');
   }
 
@@ -149,7 +190,10 @@ export class Game {
     if (this.status === 'over') return;
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     if (this.pendingDrawFrom !== opponent) {
-      socket.send(JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'no pending draw request' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'no pending draw request' }),
+      );
       return;
     }
     this.pendingDrawFrom = null;
@@ -161,8 +205,8 @@ export class Game {
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     if (this.pendingDrawFrom !== opponent) return;
     this.pendingDrawFrom = null;
-    socket.send(JSON.stringify({ type: MessageType.DRAW_REJECT }));
-    opponent.send(JSON.stringify({ type: MessageType.DRAW_REJECT }));
+    this.safeSend(socket, JSON.stringify({ type: MessageType.DRAW_REJECT }));
+    this.safeSend(opponent, JSON.stringify({ type: MessageType.DRAW_REJECT }));
     logger.info({ gameId: this.gameId }, 'draw_rejected');
   }
 
@@ -170,12 +214,15 @@ export class Game {
     if (this.status === 'over' || this.moveCount === 0) return;
     const lastMover = this.moveCount % 2 === 1 ? this.player1 : this.player2;
     if (socket !== lastMover) {
-      socket.send(JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'you did not make the last move' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'you did not make the last move' }),
+      );
       return;
     }
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     this.pendingTakebackFrom = socket;
-    opponent.send(JSON.stringify({ type: MessageType.TAKEBACK_REQUEST }));
+    this.safeSend(opponent, JSON.stringify({ type: MessageType.TAKEBACK_REQUEST }));
     logger.info({ gameId: this.gameId }, 'takeback_requested');
   }
 
@@ -183,7 +230,10 @@ export class Game {
     if (this.status === 'over') return;
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     if (this.pendingTakebackFrom !== opponent) {
-      socket.send(JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'no pending takeback request' }));
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'no pending takeback request' }),
+      );
       return;
     }
     this.board.undo();
@@ -194,8 +244,8 @@ export class Game {
       type: MessageType.TAKEBACK_ACCEPT,
       payload: { fen: this.board.fen(), moveCount: this.moveCount },
     });
-    this.player1.send(payload);
-    this.player2.send(payload);
+    this.safeSend(this.player1, payload);
+    this.safeSend(this.player2, payload);
     logger.info({ gameId: this.gameId, moveCount: this.moveCount }, 'takeback_accepted');
   }
 
@@ -204,13 +254,98 @@ export class Game {
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     if (this.pendingTakebackFrom !== opponent) return;
     this.pendingTakebackFrom = null;
-    socket.send(JSON.stringify({ type: MessageType.TAKEBACK_REJECT }));
-    opponent.send(JSON.stringify({ type: MessageType.TAKEBACK_REJECT }));
+    this.safeSend(socket, JSON.stringify({ type: MessageType.TAKEBACK_REJECT }));
+    this.safeSend(opponent, JSON.stringify({ type: MessageType.TAKEBACK_REJECT }));
     logger.info({ gameId: this.gameId }, 'takeback_rejected');
+  }
+
+  // ─── Rematch ────────────────────────────────────────────────────────────────
+
+  requestRematch(socket: WebSocket): void {
+    if (this.status !== 'over') return;
+    const opponent = socket === this.player1 ? this.player2 : this.player1;
+    if (this.pendingRematchFrom === socket) return;
+    if (this.pendingRematchFrom === opponent) {
+      this.triggerRematch();
+      return;
+    }
+    this.pendingRematchFrom = socket;
+    this.safeSend(opponent, JSON.stringify({ type: MessageType.REMATCH_REQUEST }));
+    logger.info({ gameId: this.gameId }, 'rematch_requested');
+  }
+
+  acceptRematch(socket: WebSocket): void {
+    if (this.status !== 'over') return;
+    const opponent = socket === this.player1 ? this.player2 : this.player1;
+    if (this.pendingRematchFrom !== opponent) {
+      this.safeSend(
+        socket,
+        JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'no pending rematch request' }),
+      );
+      return;
+    }
+    this.triggerRematch();
+  }
+
+  rejectRematch(socket: WebSocket): void {
+    if (this.status !== 'over') return;
+    const opponent = socket === this.player1 ? this.player2 : this.player1;
+    if (this.pendingRematchFrom !== opponent) return;
+    this.pendingRematchFrom = null;
+    this.safeSend(opponent, JSON.stringify({ type: MessageType.REMATCH_REJECT }));
+    logger.info({ gameId: this.gameId }, 'rematch_rejected');
+  }
+
+  private triggerRematch(): void {
+    this.pendingRematchFrom = null;
+    // Swap colors so players alternate sides
+    this.onRematch?.(
+      this.player2,
+      this.player1,
+      this.blackUserId,
+      this.whiteUserId,
+      this.blackUsername,
+      this.whiteUsername,
+      this.incrementMs,
+    );
+  }
+
+  // ─── Reconnection ────────────────────────────────────────────────────────────
+
+  replaceSocket(userId: string, newSocket: WebSocket): void {
+    if (this.whiteUserId === userId) {
+      this.player1 = newSocket;
+    } else if (this.blackUserId === userId) {
+      this.player2 = newSocket;
+    }
+  }
+
+  getResumePayload(userId: string): string {
+    const color = this.whiteUserId === userId ? 'white' : 'black';
+    return JSON.stringify({
+      type: MessageType.GAME_RESUME,
+      payload: {
+        gameId: this.gameId,
+        fen: this.board.fen(),
+        color,
+        clock: this.clock.getSnapshot(),
+        incrementMs: this.incrementMs,
+        opponentUsername: color === 'white' ? this.blackUsername : this.whiteUsername,
+        moveCount: this.moveCount,
+      },
+    });
   }
 
   getFen(): string {
     return this.board.fen();
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────────
+
+  private safeSend(socket: WebSocket, data: string): void {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(data);
+    }
   }
 
   private endGame(winner: 'white' | 'black' | null, reason: GameOverReason): void {
@@ -218,27 +353,45 @@ export class Game {
     this.status = 'over';
     this.clock.stop();
 
-    const payload = JSON.stringify({
+    const gameOverPayload = JSON.stringify({
       type: MessageType.GAME_OVER,
       payload: { winner, reason },
     });
-    this.player1.send(payload);
-    this.player2.send(payload);
+    this.safeSend(this.player1, gameOverPayload);
+    this.safeSend(this.player2, gameOverPayload);
     logger.info({ gameId: this.gameId, winner, reason }, 'game_ended');
 
-    // Persist to DB if at least one player is authenticated
     if (this.whiteUserId || this.blackUserId) {
-      historyService.saveGame({
-        gameId: this.gameId,
-        whiteUserId: this.whiteUserId,
-        blackUserId: this.blackUserId,
-        winner,
-        reason,
-        pgn: this.board.pgn(),
-        finalFen: this.board.fen(),
-        timeControlMs: this.timeControlMs,
-        startedAt: this.startTime,
-      });
+      historyService
+        .saveGame({
+          gameId: this.gameId,
+          whiteUserId: this.whiteUserId,
+          blackUserId: this.blackUserId,
+          winner,
+          reason,
+          pgn: this.board.pgn(),
+          finalFen: this.board.fen(),
+          timeControlMs: this.timeControlMs,
+          startedAt: this.startTime,
+        })
+        .then((result) => {
+          if (!result) return;
+          const { whiteNewRating, blackNewRating, whiteChange, blackChange } = result.ratingUpdates;
+          this.safeSend(
+            this.player1,
+            JSON.stringify({
+              type: MessageType.RATING_UPDATE,
+              payload: { newRating: whiteNewRating, change: whiteChange },
+            }),
+          );
+          this.safeSend(
+            this.player2,
+            JSON.stringify({
+              type: MessageType.RATING_UPDATE,
+              payload: { newRating: blackNewRating, change: blackChange },
+            }),
+          );
+        });
     }
 
     this.onEnd?.();

@@ -1,32 +1,40 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Chess } from 'chess.js';
 import { useSocket } from '../hooks/useSocket';
 import ChessBoard from '../components/ChessBoard/Chessboard';
 import GameControls from '../components/GameControls';
-import { logout } from '../redux/authSlice';
+import { logout, updateRating } from '../redux/authSlice';
 import {
   setStartGame,
   gameMove,
   resetGame,
   setColour,
+  setGameId,
   setOpponentUsername,
   setGameOver,
   setClock,
   setWaiting,
   setPendingDraw,
   setPendingTakeback,
+  setPendingRematch,
+  setRatingChange,
   setFenFromServer,
 } from '../redux/gameSlice';
 import { MessageType } from '../shared/constants/messageTypes';
-import { RootState } from '../redux/store';
+import type { RootState } from '../redux/store';
 
-const TIME_OPTIONS = [
-  { label: '10 min — Rapid', value: 600000 },
-  { label: '5 min — Blitz', value: 300000 },
-  { label: '3 min — Blitz', value: 180000 },
-  { label: '1 min — Bullet', value: 60000 },
+interface TimeOption {
+  label: string;
+  baseMs: number;
+  incrementMs: number;
+}
+
+const TIME_OPTIONS: TimeOption[] = [
+  { label: '10 min — Rapid', baseMs: 600_000, incrementMs: 0 },
+  { label: '10+5 — Rapid', baseMs: 600_000, incrementMs: 5_000 },
+  { label: '15+10 — Rapid', baseMs: 900_000, incrementMs: 10_000 },
 ];
 
 function formatMs(ms: number): string {
@@ -53,17 +61,13 @@ function ClockBar({
   return (
     <div
       className={`flex items-center justify-between px-5 py-4 rounded-xl transition-all duration-200 ${
-        isActive
-          ? 'bg-gray-700 ring-2 ring-green-500'
-          : 'bg-gray-800/60'
+        isActive ? 'bg-gray-700 ring-2 ring-green-500' : 'bg-gray-800/60'
       }`}
     >
       <div className="flex items-center gap-3">
         <div
           className={`w-6 h-6 rounded-full border-2 shadow-sm flex-shrink-0 ${
-            pieceColor === 'white'
-              ? 'bg-gray-100 border-gray-300'
-              : 'bg-gray-950 border-gray-600'
+            pieceColor === 'white' ? 'bg-gray-100 border-gray-300' : 'bg-gray-950 border-gray-600'
           }`}
         />
         <div>
@@ -98,37 +102,45 @@ const Game = () => {
     clockWhiteMs,
     clockBlackMs,
     opponentUsername,
+    pendingRematchRequest,
+    ratingChange,
   } = useSelector((state: RootState) => state.game);
 
-  const [selectedTc, setSelectedTc] = useState(TIME_OPTIONS[0].value);
-  const [liveWhite, setLiveWhite] = useState(0);
-  const [liveBlack, setLiveBlack] = useState(0);
+  const [selectedTcIdx, setSelectedTcIdx] = useState(0);
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
+
+  // ── Timestamp-based clock ───────────────────────────────────────────────────
+  // Store the last server clock snapshot + the moment it arrived.
+  // All display values are derived from this ref — no drift ever accumulates.
+  const clockRefRef = useRef<{ white: number; black: number; receivedAt: number } | null>(null);
+  const [, setTick] = useState(0); // used only to force a re-render every 50 ms
 
   const chess = new Chess(fen);
-  const isMyTurn = colour !== null && colour === (chess.turn() === 'w' ? 'white' : 'black');
-  const opponentColor = colour === 'white' ? 'black' : 'white';
-  const isWinner = gameOver && winner === colour;
-  const isDraw = gameOver && winner === null;
+  const activeTurn = chess.turn() === 'w' ? 'white' : 'black';
 
-  const myClockMs = colour === 'white' ? liveWhite : liveBlack;
-  const opponentClockMs = colour === 'white' ? liveBlack : liveWhite;
-
-  // Sync live clocks whenever server sends a snapshot
-  useEffect(() => {
-    setLiveWhite(clockWhiteMs ?? selectedTc);
-    setLiveBlack(clockBlackMs ?? selectedTc);
-  }, [clockWhiteMs, clockBlackMs]);
-
-  // Local 100ms countdown tied to whose turn it is (resets on each FEN change)
+  // 50 ms repaint loop — just for clock display
   useEffect(() => {
     if (!gameStarted || gameOver) return;
-    const activeTurn = chess.turn() === 'w' ? 'white' : 'black';
-    const interval = setInterval(() => {
-      if (activeTurn === 'white') setLiveWhite(prev => Math.max(0, prev - 100));
-      else setLiveBlack(prev => Math.max(0, prev - 100));
-    }, 100);
-    return () => clearInterval(interval);
-  }, [fen, gameStarted, gameOver]);
+    const id = setInterval(() => setTick((t) => t + 1), 50);
+    return () => clearInterval(id);
+  }, [gameStarted, gameOver]);
+
+  // Compute live clock values from the timestamp-anchored snapshot
+  const ref = clockRefRef.current;
+  const elapsedSinceSnapshot = ref ? Math.max(0, Date.now() - ref.receivedAt) : 0;
+  const liveWhite = ref
+    ? Math.max(0, ref.white - (activeTurn === 'white' ? elapsedSinceSnapshot : 0))
+    : (clockWhiteMs ?? TIME_OPTIONS[selectedTcIdx].baseMs);
+  const liveBlack = ref
+    ? Math.max(0, ref.black - (activeTurn === 'black' ? elapsedSinceSnapshot : 0))
+    : (clockBlackMs ?? TIME_OPTIONS[selectedTcIdx].baseMs);
+
+  const opponentColor = colour === 'white' ? 'black' : 'white';
+  const isMyTurn = colour !== null && colour === activeTurn;
+  const isWinner = gameOver && winner === colour;
+  const isDraw = gameOver && winner === null;
+  const myClockMs = colour === 'white' ? liveWhite : liveBlack;
+  const opponentClockMs = colour === 'white' ? liveBlack : liveWhite;
 
   // WebSocket message handler
   useEffect(() => {
@@ -139,48 +151,104 @@ const Game = () => {
         case MessageType.INIT_GAME:
           dispatch(setStartGame(true));
           dispatch(setColour(message.payload.color));
+          dispatch(setGameId(message.payload.gameId));
           dispatch(setOpponentUsername(message.payload.opponentUsername ?? null));
           dispatch(setClock({ white: message.payload.timeMs, black: message.payload.timeMs }));
+          clockRefRef.current = {
+            white: message.payload.timeMs,
+            black: message.payload.timeMs,
+            receivedAt: Date.now(),
+          };
+          setOpponentDisconnected(false);
           break;
+
+        case MessageType.GAME_RESUME:
+          dispatch(setStartGame(true));
+          dispatch(setColour(message.payload.color));
+          dispatch(setGameId(message.payload.gameId));
+          dispatch(setOpponentUsername(message.payload.opponentUsername ?? null));
+          dispatch(setFenFromServer(message.payload.fen));
+          dispatch(setClock(message.payload.clock));
+          clockRefRef.current = { ...message.payload.clock, receivedAt: Date.now() };
+          setOpponentDisconnected(false);
+          break;
+
         case MessageType.MOVE:
           dispatch(gameMove(message.payload.move));
           dispatch(setClock(message.payload.clock));
+          clockRefRef.current = { ...message.payload.clock, receivedAt: Date.now() };
+          setOpponentDisconnected(false);
           break;
+
         case MessageType.GAME_OVER:
-          dispatch(setGameOver({
-            winner: message.payload.winner,
-            reason: message.payload.reason ?? 'unknown',
-          }));
+          dispatch(
+            setGameOver({
+              winner: message.payload.winner,
+              reason: message.payload.reason ?? 'unknown',
+            }),
+          );
+          setOpponentDisconnected(false);
           break;
+
+        case MessageType.RATING_UPDATE:
+          dispatch(updateRating(message.payload.newRating));
+          dispatch(setRatingChange(message.payload.change));
+          break;
+
         case MessageType.DRAW_REQUEST:
           dispatch(setPendingDraw(true));
           break;
+
         case MessageType.DRAW_REJECT:
           dispatch(setPendingDraw(false));
           break;
+
         case MessageType.TAKEBACK_REQUEST:
           dispatch(setPendingTakeback(true));
           break;
+
         case MessageType.TAKEBACK_ACCEPT:
           dispatch(setFenFromServer(message.payload.fen));
           dispatch(setPendingTakeback(false));
           break;
+
         case MessageType.TAKEBACK_REJECT:
           dispatch(setPendingTakeback(false));
+          break;
+
+        case MessageType.REMATCH_REQUEST:
+          dispatch(setPendingRematch(true));
+          break;
+
+        case MessageType.REMATCH_REJECT:
+          dispatch(setPendingRematch(false));
+          break;
+
+        case MessageType.GAME_ALERT:
+          if (typeof message.payload === 'string') {
+            if (message.payload.includes('disconnected')) setOpponentDisconnected(true);
+            if (message.payload.includes('reconnected')) setOpponentDisconnected(false);
+          }
           break;
       }
     };
   }, [socket, dispatch]);
 
+  const send = (type: string, payload?: object) => {
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type, ...payload }));
+    }
+  };
+
   const startGame = () => {
+    const tc = TIME_OPTIONS[selectedTcIdx];
     dispatch(setWaiting(true));
-    socket?.send(JSON.stringify({ type: MessageType.INIT_GAME, timeControlMs: selectedTc }));
+    send(MessageType.INIT_GAME, { timeControlMs: tc.baseMs, incrementMs: tc.incrementMs });
   };
 
   const handleNewGame = () => {
+    clockRefRef.current = null;
     dispatch(resetGame());
-    setLiveWhite(selectedTc);
-    setLiveBlack(selectedTc);
   };
 
   return (
@@ -191,8 +259,12 @@ const Game = () => {
         <div className="flex items-center gap-6">
           <div className="flex gap-6 text-gray-400 text-sm font-medium">
             <span className="hover:text-white cursor-pointer transition-colors">Play</span>
-            <span onClick={() => navigate('/history')} className="hover:text-white cursor-pointer transition-colors">History</span>
-            <span className="hover:text-white cursor-pointer transition-colors">Leaderboard</span>
+            <span
+              onClick={() => navigate('/history')}
+              className="hover:text-white cursor-pointer transition-colors"
+            >
+              History
+            </span>
           </div>
           {authUser && (
             <div className="flex items-center gap-3 border-l border-gray-700 pl-6">
@@ -201,10 +273,23 @@ const Game = () => {
                   {authUser.username[0].toUpperCase()}
                 </div>
                 <span className="text-gray-300 text-sm font-medium">{authUser.username}</span>
-                <span className="text-gray-500 text-xs">({authUser.rating})</span>
+                <span className="text-gray-500 text-xs">
+                  ({authUser.rating}
+                  {ratingChange !== null && (
+                    <span className={ratingChange >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {' '}
+                      {ratingChange >= 0 ? '+' : ''}
+                      {ratingChange}
+                    </span>
+                  )}
+                  )
+                </span>
               </div>
               <button
-                onClick={() => { dispatch(logout()); navigate('/login'); }}
+                onClick={() => {
+                  dispatch(logout());
+                  navigate('/login');
+                }}
                 className="text-gray-500 hover:text-red-400 text-xs transition-colors"
               >
                 Sign out
@@ -215,17 +300,44 @@ const Game = () => {
       </nav>
 
       {/* Board + Sidebar */}
-      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24, padding: 24, flex: 1 }}>
-
-        {/* Chess board — wrapped so it is always a fixed-size flex item */}
-        <div style={{ flexShrink: 0 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 24,
+          padding: 24,
+          flex: 1,
+        }}
+      >
+        {/* Chess board */}
+        <div style={{ flexShrink: 0, position: 'relative' }}>
           <ChessBoard socket={socket} />
+          {opponentDisconnected && gameStarted && !gameOver && (
+            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center rounded-lg gap-3">
+              <div className="w-8 h-8 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+              <p className="text-yellow-300 font-semibold text-sm text-center px-4">
+                Opponent disconnected
+                <br />
+                <span className="text-gray-300 text-xs font-normal">Waiting up to 30 s…</span>
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
-        <div style={{ width: 288, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 640 }}>
-
-          {/* Opponent bar (top) — only when a game is in progress */}
+        <div
+          style={{
+            width: 288,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            minHeight: 640,
+          }}
+        >
+          {/* Opponent clock bar */}
           {gameStarted ? (
             <ClockBar
               name={opponentUsername ?? 'Opponent'}
@@ -240,22 +352,25 @@ const Game = () => {
             </div>
           )}
 
-          {/* Middle — grows to fill available space */}
+          {/* Middle panel */}
           <div className="flex-1 flex flex-col gap-3">
-
             {/* Pre-game */}
             {!gameStarted && (
               <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 flex flex-col gap-4 h-full">
                 <div>
-                  <p className="text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">Time Control</p>
+                  <p className="text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">
+                    Time Control
+                  </p>
                   <select
                     className="w-full bg-gray-700 text-white rounded-lg px-3 py-2.5 text-sm border border-gray-600 focus:outline-none focus:border-green-500 transition-colors"
-                    value={selectedTc}
-                    onChange={e => setSelectedTc(parseInt(e.target.value))}
+                    value={selectedTcIdx}
+                    onChange={(e) => setSelectedTcIdx(parseInt(e.target.value))}
                     disabled={isWaiting}
                   >
-                    {TIME_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    {TIME_OPTIONS.map((opt, idx) => (
+                      <option key={idx} value={idx}>
+                        {opt.label}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -281,7 +396,7 @@ const Game = () => {
 
                 {isWaiting && (
                   <p className="text-gray-500 text-xs text-center leading-relaxed">
-                    Waiting for a {TIME_OPTIONS.find(o => o.value === selectedTc)?.label} opponent
+                    Waiting for a {TIME_OPTIONS[selectedTcIdx].label} opponent
                   </p>
                 )}
               </div>
@@ -292,16 +407,21 @@ const Game = () => {
               <div className="flex flex-col gap-3 h-full">
                 <div className="bg-gray-800 rounded-xl px-5 py-3 border border-gray-700 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className={`w-4 h-4 rounded-full border ${colour === 'white' ? 'bg-gray-100 border-gray-300' : 'bg-gray-950 border-gray-600'}`} />
-                    <span className="text-gray-300 text-sm font-medium capitalize">Playing as {colour}</span>
+                    <div
+                      className={`w-4 h-4 rounded-full border ${colour === 'white' ? 'bg-gray-100 border-gray-300' : 'bg-gray-950 border-gray-600'}`}
+                    />
+                    <span className="text-gray-300 text-sm font-medium capitalize">
+                      Playing as {colour}
+                    </span>
                   </div>
-                  <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                    isMyTurn ? 'bg-green-600/20 text-green-400' : 'bg-gray-700 text-gray-400'
-                  }`}>
+                  <span
+                    className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                      isMyTurn ? 'bg-green-600/20 text-green-400' : 'bg-gray-700 text-gray-400'
+                    }`}
+                  >
                     {isMyTurn ? 'Your turn' : 'Waiting'}
                   </span>
                 </div>
-
                 <div className="flex-1">
                   <GameControls socket={socket} />
                 </div>
@@ -329,22 +449,41 @@ const Game = () => {
                     <p className="text-yellow-400 font-bold text-3xl">Draw</p>
                   </>
                 )}
+
                 {gameOverReason && (
                   <p className="text-gray-500 text-sm capitalize text-center">
                     {gameOverReason.replace(/_/g, ' ')}
                   </p>
                 )}
-                <button
-                  className="mt-2 bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-8 rounded-xl w-full transition-all shadow-lg hover:shadow-green-500/20 text-sm"
-                  onClick={handleNewGame}
-                >
-                  New Game
-                </button>
+
+                {ratingChange !== null && (
+                  <p
+                    className={`text-sm font-semibold ${ratingChange >= 0 ? 'text-green-400' : 'text-red-400'}`}
+                  >
+                    Rating: {ratingChange >= 0 ? '+' : ''}
+                    {ratingChange} → {authUser?.rating}
+                  </p>
+                )}
+
+                <div className="flex flex-col gap-2 w-full mt-2">
+                  <button
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-8 rounded-xl w-full transition-all text-sm"
+                    onClick={() => send(MessageType.REMATCH_REQUEST)}
+                  >
+                    ↺ Rematch
+                  </button>
+                  <button
+                    className="bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-8 rounded-xl w-full transition-all shadow-lg hover:shadow-green-500/20 text-sm"
+                    onClick={handleNewGame}
+                  >
+                    New Game
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* My bar (bottom) — only when a game is in progress */}
+          {/* My clock bar */}
           {gameStarted ? (
             <ClockBar
               name={authUser?.username ?? 'You'}
@@ -360,6 +499,38 @@ const Game = () => {
           )}
         </div>
       </div>
+
+      {/* Incoming rematch request modal */}
+      {pendingRematchRequest && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-xl p-6 flex flex-col items-center gap-4 shadow-2xl border border-gray-600 max-w-xs w-full mx-4">
+            <p className="text-3xl">↺</p>
+            <p className="text-white text-lg font-bold text-center">Opponent wants a rematch!</p>
+            <div className="flex gap-3 w-full">
+              <button
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg transition-colors"
+                onClick={() => {
+                  send(MessageType.REMATCH_ACCEPT);
+                  dispatch(setPendingRematch(false));
+                  dispatch(resetGame());
+                  clockRefRef.current = null;
+                }}
+              >
+                Accept
+              </button>
+              <button
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded-lg transition-colors"
+                onClick={() => {
+                  send(MessageType.REMATCH_REJECT);
+                  dispatch(setPendingRematch(false));
+                }}
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

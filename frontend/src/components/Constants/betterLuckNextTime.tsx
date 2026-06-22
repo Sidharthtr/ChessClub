@@ -25,12 +25,9 @@ const BetterLuckSign: React.FC = () => {
       <h1 style={{ fontSize: '4em', color: 'gray', textShadow: '2px 2px 4px rgba(0, 0, 0, 0.3)' }}>
         Better Luck Next Time!
       </h1>
-      <p style={{ fontSize: '1.5em', color: 'gray' }}>
-        Don't worry, you'll get it next time!
-      </p>
+      <p style={{ fontSize: '1.5em', color: 'gray' }}>Don't worry, you'll get it next time!</p>
     </div>
   );
 };
 
 export default BetterLuckSign;
-

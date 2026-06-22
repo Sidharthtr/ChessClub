@@ -1,5 +1,7 @@
-import { Router, Request, Response } from 'express';
-import { requireAuth, AuthRequest } from '../auth/authMiddleware';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
+import type { AuthRequest } from '../auth/authMiddleware';
+import { requireAuth } from '../auth/authMiddleware';
 import { historyService } from './HistoryService';
 
 export const historyRouter = Router();

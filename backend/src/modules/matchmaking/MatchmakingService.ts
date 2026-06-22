@@ -1,55 +1,147 @@
-import { WebSocket } from 'ws';
-import { GameService } from '../game/GameService';
-import { TIME_CONTROLS } from '../../shared/constants/timeControls';
+import type { WebSocket } from 'ws';
+import type { GameService } from '../game/GameService';
+import { DEFAULT_TIME_CONTROL, tcKey } from '../../shared/constants/timeControls';
+import { sendError } from '../../shared/errors/errorHandler';
 import { logger } from '../../shared/utils/logger';
 
-interface PendingEntry {
+interface QueueEntry {
   socket: WebSocket;
   userId: string | null;
   username: string | null;
+  rating: number;
+  enqueuedAt: number;
+  timerId: ReturnType<typeof setInterval>;
+  baseTimeMs: number;
+  incrementMs: number;
 }
 
+const INITIAL_WINDOW = 100;
+const WINDOW_EXPANSION = 50;
+const EXPANSION_INTERVAL_MS = 10_000;
+const MAX_WINDOW = 500;
+
 export class MatchmakingService {
-  // One pending slot per time control — players only match within the same time control
-  private pendingByTimeControl: Map<number, PendingEntry> = new Map();
+  // Queue key = tcKey(baseMs, incrementMs) so Rapid 10+0 and Rapid 10+5 never cross-match
+  private queues: Map<string, QueueEntry[]> = new Map();
 
   constructor(private gameService: GameService) {}
 
-  handleInitGame(socket: WebSocket, timeControlMs: number = TIME_CONTROLS.RAPID, userId: string | null = null, username: string | null = null): void {
-    const pending = this.pendingByTimeControl.get(timeControlMs);
-    const isSameUser = userId !== null && pending?.userId === userId;
-    const isDifferentSocket = pending && pending.socket !== socket;
-
-    if (isDifferentSocket && !isSameUser) {
-      const game = this.gameService.createGame(
-        pending.socket,
-        socket,
-        timeControlMs,
-        pending.userId,
-        userId,
-        pending.username,
-        username,
-      );
-      this.pendingByTimeControl.delete(timeControlMs);
-      logger.info({ gameId: game.gameId, timeControlMs }, 'matchmaking_success');
-    } else if (isSameUser) {
-      // Prevent same account from playing itself across tabs
-      const { sendError } = require('../../shared/errors/errorHandler');
-      sendError(socket, 'You are already in the matchmaking queue. Close the other tab first.');
-      logger.warn({ userId, timeControlMs }, 'self_match_attempted');
-    } else {
-      this.pendingByTimeControl.set(timeControlMs, { socket, userId, username });
-      logger.info({ timeControlMs }, 'waiting_for_opponent');
+  handleInitGame(
+    socket: WebSocket,
+    baseTimeMs: number = DEFAULT_TIME_CONTROL.baseMs,
+    incrementMs = 0,
+    userId: string | null = null,
+    username: string | null = null,
+    rating = 1200,
+  ): void {
+    if (this.findEntryBySocket(socket)) {
+      sendError(socket, 'Already in queue. Close the other tab first.');
+      return;
     }
+
+    const key = tcKey(baseTimeMs, incrementMs);
+    const entry: QueueEntry = {
+      socket,
+      userId,
+      username,
+      rating,
+      enqueuedAt: Date.now(),
+      timerId: null!,
+      baseTimeMs,
+      incrementMs,
+    };
+
+    if (this.tryMatch(entry, key)) return;
+
+    const timerId = setInterval(() => {
+      if (!this.getQueue(key).includes(entry)) {
+        clearInterval(timerId);
+        return;
+      }
+      this.tryMatch(entry, key);
+    }, EXPANSION_INTERVAL_MS);
+
+    entry.timerId = timerId;
+    this.getQueue(key).push(entry);
+    logger.info({ baseTimeMs, incrementMs, rating, userId }, 'player_queued');
   }
 
   removePendingUser(socket: WebSocket): void {
-    for (const [tc, entry] of this.pendingByTimeControl.entries()) {
-      if (entry.socket === socket) {
-        this.pendingByTimeControl.delete(tc);
-        logger.info({ timeControlMs: tc }, 'pending_user_removed_on_disconnect');
-        break;
+    const entry = this.findEntryBySocket(socket);
+    if (entry) {
+      this.dequeue(entry);
+      logger.info({ userId: entry.userId }, 'pending_user_removed_on_disconnect');
+    }
+  }
+
+  // ─── Private ─────────────────────────────────────────────────────────────────
+
+  private tryMatch(entry: QueueEntry, key: string): boolean {
+    const pool = this.getQueue(key);
+    const waitMs = Date.now() - entry.enqueuedAt;
+    const window = Math.min(
+      INITIAL_WINDOW + Math.floor(waitMs / EXPANSION_INTERVAL_MS) * WINDOW_EXPANSION,
+      MAX_WINDOW,
+    );
+
+    const opponent = pool.find(
+      (e) =>
+        e !== entry &&
+        !(entry.userId !== null && e.userId !== null && e.userId === entry.userId) &&
+        Math.abs(e.rating - entry.rating) <= window,
+    );
+
+    if (!opponent) return false;
+
+    this.dequeue(entry);
+    this.dequeue(opponent);
+
+    const [white, black] = Math.random() < 0.5 ? [entry, opponent] : [opponent, entry];
+
+    this.gameService.createGame(
+      white.socket,
+      black.socket,
+      entry.baseTimeMs,
+      entry.incrementMs,
+      white.userId,
+      black.userId,
+      white.username,
+      black.username,
+    );
+
+    logger.info(
+      {
+        baseTimeMs: entry.baseTimeMs,
+        incrementMs: entry.incrementMs,
+        ratingDiff: Math.abs(entry.rating - opponent.rating),
+        window,
+      },
+      'matchmaking_success',
+    );
+    return true;
+  }
+
+  private getQueue(key: string): QueueEntry[] {
+    if (!this.queues.has(key)) this.queues.set(key, []);
+    return this.queues.get(key)!;
+  }
+
+  private dequeue(entry: QueueEntry): void {
+    clearInterval(entry.timerId);
+    for (const pool of this.queues.values()) {
+      const idx = pool.indexOf(entry);
+      if (idx !== -1) {
+        pool.splice(idx, 1);
+        return;
       }
     }
+  }
+
+  private findEntryBySocket(socket: WebSocket): QueueEntry | undefined {
+    for (const pool of this.queues.values()) {
+      const e = pool.find((e) => e.socket === socket);
+      if (e) return e;
+    }
+    return undefined;
   }
 }

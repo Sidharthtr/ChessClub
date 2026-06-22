@@ -1,4 +1,5 @@
-import { useState, FormEvent } from 'react';
+import type { FormEvent } from 'react';
+import { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api/client';
@@ -55,7 +56,7 @@ const Login = () => {
               type="email"
               required
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               className="bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:border-green-500 transition-colors"
               placeholder="you@example.com"
             />
@@ -67,7 +68,7 @@ const Login = () => {
               type="password"
               required
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
               className="bg-gray-700 text-white rounded-lg px-4 py-2.5 border border-gray-600 focus:outline-none focus:border-green-500 transition-colors"
               placeholder="••••••••"
             />

@@ -1,5 +1,3 @@
-
-
 // import React, { useState, useEffect } from 'react';
 // import { Chess, Square } from 'chess.js';
 // import ChessSquare from './ChessSquare';
@@ -16,7 +14,6 @@
 //   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
 //   const [gameOver, setGameOver] = useState(false);
 //   const boxSize = 80;
-  
 
 //   // Function to handle selecting a square
 
@@ -30,20 +27,19 @@
 
 //       // Update the game state with the move
 //       // chess.move(move);
-     
+
 //         // Update the board
-      
+
 //     }
 //   };
 
-
 //   const handleSquareClick = (square: Square) => {
 //     console.log(selectedSquare);
-     
+
 //     if (selectedSquare === square) {
 //       // Unselect the square if it's already selected
 //       setSelectedSquare(null);
-      
+
 //     } else if (selectedSquare) {
 //       // Attempt to make a move if a square is already selected
 //       console.log("1.while sending ..",game.fen())
@@ -53,7 +49,7 @@
 //         setGame(new Chess(game.fen()));
 //         makeMove({ from: selectedSquare, to: square }); // Update game state with new board
 //         setSelectedSquare(null);
-       
+
 //         if (move?.flags.includes('c')) {
 //           // If a capture happened, you can trigger sound effects here
 //         }
@@ -70,7 +66,7 @@
 //     } else {
 //       // Select a square
 //       setSelectedSquare(square);
-  
+
 //     }
 //   };
 
@@ -121,4 +117,3 @@
 // };
 
 // export default ChessBoard;
-

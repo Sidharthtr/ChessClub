@@ -1,18 +1,17 @@
-
-import { Color, PieceSymbol, Square } from 'chess.js';
+import type { Color, PieceSymbol, Square } from 'chess.js';
 
 const ChessSquare = ({
-    square,
-  }: {
-    square: {
-      square: Square;
-      type: PieceSymbol;
-      color: Color;
-    }|null;
-  })=> {
+  square,
+}: {
+  square: {
+    square: Square;
+    type: PieceSymbol;
+    color: Color;
+  } | null;
+}) => {
   if (!square) return null;
 
-  const { type, color } = square
+  const { type, color } = square;
 
   return (
     <div className={`piece ${color}`} style={{ fontSize: '40px' }}>

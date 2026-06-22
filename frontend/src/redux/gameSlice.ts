@@ -1,4 +1,5 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { PayloadAction } from '@reduxjs/toolkit';
+import { createSlice } from '@reduxjs/toolkit';
 import { Chess } from 'chess.js';
 
 type Color = 'white' | 'black' | null;
@@ -12,11 +13,14 @@ interface GameState {
   gameOverReason: string | null;
   winner: string | null;
   colour: Color;
+  gameId: string | null;
   opponentUsername: string | null;
   pendingDrawRequest: boolean;
   pendingTakebackRequest: boolean;
+  pendingRematchRequest: boolean;
   clockWhiteMs: number | null;
   clockBlackMs: number | null;
+  ratingChange: number | null;
 }
 
 interface Move {
@@ -33,11 +37,14 @@ const initialState: GameState = {
   gameOverReason: null,
   winner: null,
   colour: null,
+  gameId: null,
   opponentUsername: null,
   pendingDrawRequest: false,
   pendingTakebackRequest: false,
+  pendingRematchRequest: false,
   clockWhiteMs: null,
   clockBlackMs: null,
+  ratingChange: null,
 };
 
 const gameSlice = createSlice({
@@ -65,6 +72,9 @@ const gameSlice = createSlice({
     setColour(state, action: PayloadAction<Color>) {
       state.colour = action.payload;
     },
+    setGameId(state, action: PayloadAction<string | null>) {
+      state.gameId = action.payload;
+    },
     setOpponentUsername(state, action: PayloadAction<string | null>) {
       state.opponentUsername = action.payload;
     },
@@ -78,6 +88,12 @@ const gameSlice = createSlice({
     setPendingTakeback(state, action: PayloadAction<boolean>) {
       state.pendingTakebackRequest = action.payload;
     },
+    setPendingRematch(state, action: PayloadAction<boolean>) {
+      state.pendingRematchRequest = action.payload;
+    },
+    setRatingChange(state, action: PayloadAction<number | null>) {
+      state.ratingChange = action.payload;
+    },
     setFenFromServer(state, action: PayloadAction<string>) {
       state.fen = action.payload;
     },
@@ -90,11 +106,14 @@ const gameSlice = createSlice({
       state.gameOverReason = null;
       state.winner = null;
       state.colour = null;
+      state.gameId = null;
       state.opponentUsername = null;
       state.pendingDrawRequest = false;
       state.pendingTakebackRequest = false;
+      state.pendingRematchRequest = false;
       state.clockWhiteMs = null;
       state.clockBlackMs = null;
+      state.ratingChange = null;
     },
     gameMove(state, action: PayloadAction<Move>) {
       const chess = new Chess(state.fen);
@@ -115,10 +134,13 @@ export const {
   setStartGame,
   setGameOver,
   setColour,
+  setGameId,
   setOpponentUsername,
   setClock,
   setPendingDraw,
   setPendingTakeback,
+  setPendingRematch,
+  setRatingChange,
   setFenFromServer,
   resetGame,
   gameMove,

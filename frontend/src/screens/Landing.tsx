@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import chessBoard from '../assets/chess_board.webp';
-import { RootState } from '../redux/store';
+import type { RootState } from '../redux/store';
 
 const Landing = () => {
   const navigate = useNavigate();

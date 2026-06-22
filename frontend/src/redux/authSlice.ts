@@ -1,4 +1,5 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { PayloadAction } from '@reduxjs/toolkit';
+import { createSlice } from '@reduxjs/toolkit';
 
 interface AuthUser {
   id: string;
@@ -30,6 +31,12 @@ const authSlice = createSlice({
       localStorage.setItem('chess_token', action.payload.token);
       localStorage.setItem('chess_user', JSON.stringify(action.payload.user));
     },
+    updateRating(state, action: PayloadAction<number>) {
+      if (state.user) {
+        state.user = { ...state.user, rating: action.payload };
+        localStorage.setItem('chess_user', JSON.stringify(state.user));
+      }
+    },
     logout(state) {
       state.token = null;
       state.user = null;
@@ -39,5 +46,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, logout } = authSlice.actions;
+export const { setCredentials, updateRating, logout } = authSlice.actions;
 export default authSlice.reducer;

@@ -11,6 +11,7 @@ export const IncomingMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal(MessageType.INIT_GAME),
     timeControlMs: z.number().int().positive().optional(),
+    incrementMs: z.number().int().min(0).optional(),
   }),
   z.object({ type: z.literal(MessageType.MOVE), move: MovePayloadSchema }),
   z.object({ type: z.literal(MessageType.RESIGN) }),
@@ -20,6 +21,9 @@ export const IncomingMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal(MessageType.DRAW_REQUEST) }),
   z.object({ type: z.literal(MessageType.DRAW_ACCEPT) }),
   z.object({ type: z.literal(MessageType.DRAW_REJECT) }),
+  z.object({ type: z.literal(MessageType.REMATCH_REQUEST) }),
+  z.object({ type: z.literal(MessageType.REMATCH_ACCEPT) }),
+  z.object({ type: z.literal(MessageType.REMATCH_REJECT) }),
 ]);
 
 export type IncomingMessage = z.infer<typeof IncomingMessageSchema>;

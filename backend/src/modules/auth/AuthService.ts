@@ -15,7 +15,10 @@ export class AuthService {
       where: { OR: [{ email }, { username }] },
     });
     if (existing) {
-      throw new AppError(existing.email === email ? 'Email already in use' : 'Username already taken', 409);
+      throw new AppError(
+        existing.email === email ? 'Email already in use' : 'Username already taken',
+        409,
+      );
     }
 
     const passwordHash = await bcrypt.hash(password, 10);

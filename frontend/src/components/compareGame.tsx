@@ -8,11 +8,8 @@
 // const App: React.FC = () => {
 //   const [game, setGame] = useState(new Chess());
 //   const [isGameStarted, setIsGameStarted] = useState(false); // State to track if the game has started
- 
 
 //   const socket = useSocket();
-
-
 
 //   useEffect(() => {
 //     if(!socket) return;
@@ -35,29 +32,25 @@
 //           console.log("2st ")
 //           setGame(new Chess(game.fen()));
 //         }
-        
-//        } 
+
+//        }
 
 //     }
-      
-//   }, [socket]);
 
-  
+//   }, [socket]);
 
 //   const startGame = () => {
 //     if (socket) {
 //       console.log('Starting game...');
 //       socket.send(JSON.stringify({ type: 'init_game' }));
 //     }
-   
+
 //   };
 
 //   const exitGame = () => {
 //     setGame(new Chess()); // Initialize the chess game
-//     setIsGameStarted(false); // Set game as not started 
+//     setIsGameStarted(false); // Set game as not started
 //   }
-
-  
 
 //   return (
 //     <div className="flex flex-row space-x-8 justify-center items-start text-white bg-gray-800 h-screen w-full">
@@ -112,13 +105,9 @@
 //         </div>
 //       </div>
 
-
-
 //     </div>
-
 
 //   );
 // };
 
 // export default App;
-
