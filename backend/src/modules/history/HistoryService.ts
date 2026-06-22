@@ -1,3 +1,27 @@
+/**
+ * HistoryService.ts — Persists completed game records and updates Elo ratings.
+ *
+ * Called from Game.ts (endGame) after every game finishes. If both players are
+ * authenticated (non-null userIds), it also recalculates Elo ratings and updates
+ * the user rows in the database, then returns the new ratings so Game.ts can
+ * send a RATING_UPDATE message to both players.
+ *
+ * All failures are swallowed (returns null) so a DB outage never crashes the
+ * live game server — the game completes even if history cannot be saved.
+ *
+ * METHODS:
+ *  saveGame(data)          — persists game + updates ratings; returns ratingUpdates or null
+ *  getGame(gameId)         — fetches a single game with player details
+ *  getUserGames(userId)    — fetches the last 50 games for a user, newest first
+ *
+ * HOW IT CONNECTS:
+ *  - Game.ts calls historyService.saveGame() from endGame()
+ *  - historyRouter exposes getGame / getUserGames via HTTP
+ *  - EloService.calculateElo() is called here (not in Game.ts) to keep domain logic separated
+ *  - prisma.ts is the single shared Prisma client
+ */
+
+import type { GameOverReason, GameWinner } from '@prisma/client';
 import { prisma } from '../../shared/db/prisma';
 import { logger } from '../../shared/utils/logger';
 import type { RatingResult } from '../rating/EloService';
@@ -7,8 +31,8 @@ export interface SaveGameData {
   gameId: string;
   whiteUserId: string | null;
   blackUserId: string | null;
-  winner: 'white' | 'black' | null;
-  reason: string;
+  winner: GameWinner | null;
+  reason: GameOverReason;
   pgn: string;
   finalFen: string;
   timeControlMs: number;

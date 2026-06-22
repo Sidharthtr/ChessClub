@@ -1,169 +1,122 @@
 # ChessClub — Development Plan
 
-> Update this file at the end of every phase. Mark items with ✅ when done, 🔄 when in progress, ⏳ when pending.
+> Update at the end of every phase. Status: ✅ done · 🔄 in progress · ⏳ pending.
 
 ---
 
 ## ✅ Phase 0 — Fix Existing Bugs
 
-**Goal**: Get existing code to compile and run end-to-end.
+- [x] `MessageType` enum import mismatches in `Game.ts`, `SocketManager.ts`
+- [x] `Move` → `MovePayload` type naming
+- [x] `ws.on('disconnect')` → `ws.on('close')`
+- [x] Games identified by UUID (`gameId`), not socket reference
+- [x] `findGameById()` added to `GameService`
 
-- [x] Fixed `MessageType` enum import mismatch in `Game.ts` and `SocketManager.ts`
-- [x] Fixed `Move` → `MovePayload` type naming in `Game.ts`
-- [x] Fixed `ws.on('disconnect')` → `ws.on('close')` in `server.ts`
-- [x] Added `gameId` (UUID) to `Game` class — games no longer identified by socket reference
-- [x] Added `findGameById()` to `GameService`
-
-**Test Gate** ✅ Two browsers can play a full game end-to-end.
+**Test Gate** ✅ Two browsers play a full game end-to-end.
 
 ---
 
 ## ✅ Phase 1 — Input Validation + Logging
 
-**Goal**: Production-grade message handling — no crashes on bad input.
+- [x] `zod`, `pino`, `pino-pretty`, `dotenv` installed
+- [x] `src/config/env.ts` — centralized env config
+- [x] `src/shared/utils/logger.ts` — Pino logger (pretty in dev, JSON in prod)
+- [x] `src/shared/errors/AppError.ts` + `errorHandler.ts`
+- [x] `src/shared/schemas/message.schema.ts` — Zod discriminated union
+- [x] Zod validation wired into `SocketManager.handleMessages()`
+- [x] All `console.log` replaced with structured `logger.*`
+- [x] `.env` and `.env.example` created
 
-- [x] Installed `zod`, `pino`, `pino-pretty`, `dotenv`
-- [x] `src/config/env.ts` — centralised env config with defaults
-- [x] `src/shared/utils/logger.ts` — Pino structured logger (pretty in dev, JSON in prod)
-- [x] `src/shared/errors/AppError.ts` — `AppError`, `ValidationError`, `GameError`
-- [x] `src/shared/errors/errorHandler.ts` — `sendError()` and `handleWsError()`
-- [x] `src/shared/schemas/message.schema.ts` — Zod schemas for all incoming WS messages
-- [x] Wired Zod validation into `SocketManager` — invalid messages never crash the server
-- [x] Replaced all `console.log` with structured `logger.*` calls
-- [x] Created `.env` and `.env.example`
-
-**Test Gate** ✅ Malformed JSON → server sends error, stays alive. Valid moves → structured JSON logs visible.
+**Test Gate** ✅ Bad JSON → server replies with error and stays alive.
 
 ---
 
-## 🔄 Phase 2 — Core Chess Features
+## ✅ Phase 2 — Core Chess Features
 
-**Goal**: Feels like a real chess app.
+- [x] `shared/constants/timeControls.ts` — 10+0, 10+5, 15+10 presets
+- [x] `modules/game/chess-clock.ts` — server-authoritative clock with Fischer increment
+- [x] `Game.ts` — clock integration, game-over with `reason` field
+- [x] Resign, draw request/accept/reject, takeback request/accept/reject
+- [x] Clock snapshot embedded in every MOVE broadcast
+- [x] Frontend Redux state for all game flows; turn enforcement on the board
+- [x] Resign confirmation modal
 
-### Backend
-
-- [x] `shared/constants/timeControls.ts` — BULLET, BLITZ_3, BLITZ_5, RAPID, CLASSICAL constants
-- [x] `modules/game/chess-clock.ts` — server-authoritative clock with `start()`, `recordMove()`, `undoMove()`, `stop()`, `getSnapshot()`
-- [x] `Game.ts` — integrated chess clock; game ends with `reason` field (checkmate, stalemate, draws, timeout)
-- [x] `Game.ts` — `resign(socket)` → instant game over
-- [x] `Game.ts` — `requestDraw / acceptDraw / rejectDraw` request flow
-- [x] `Game.ts` — `requestTakeback / acceptTakeback / rejectTakeback` flow with `board.undo()`
-- [x] Clock snapshot `{ white, black }` sent with every MOVE broadcast
-- [x] `SocketManager.ts` — routes RESIGN, DRAW*\*, TAKEBACK*\* to Game methods
-
-### Frontend
-
-- [x] `src/shared/constants/messageTypes.ts` — mirrors backend enum (replaces `components/message.ts`)
-- [x] `src/redux/gameSlice.ts` — added `winner`, `gameOverReason`, `pendingDrawRequest`, `pendingTakebackRequest`
-- [x] `src/screens/Game.tsx` — handles DRAW_REQUEST, TAKEBACK_REQUEST, TAKEBACK_ACCEPT, DRAW_REJECT, TAKEBACK_REJECT
-- [x] `src/components/ChessBoard/Chessboard.tsx` — turn enforcement: only own pieces selectable on own turn
-- [x] `src/components/GameControls/index.tsx` — Resign / Offer Draw / Takeback buttons + accept/reject modals
-- [x] Deleted deprecated `src/components/message.ts`
-
-### Bug fixes (post-Phase 2)
-
-- [x] Time control mismatch — frontend now sends `timeControlMs` in INIT_GAME; schema + matchmaking accept it
-- [x] Game auto-cleanup via `onEnd` callback — stale entries removed, "can't move after restart" fixed
-- [x] Disconnect notifies opponent — `SocketManager.removeUser` calls `game.resign(socket)`
-- [x] `isWaiting` state — spinner shown while searching for opponent
-- [x] Clock display — `clockWhiteMs` / `clockBlackMs` in Redux; live 100ms countdown in `Game.tsx`
-- [x] UI redesign — navbar, player bars with clocks, right-side panel (time control + result)
-- [x] Resign confirmation modal — clicking Resign opens "Are you sure?" popup before sending
-- [x] Exit Game removed — Resign is the only way to leave an active game
-
-**Test Gate** ✅ Both sides typecheck clean. Manually verify: checkmate, timeout, resignation, accepted draw, accepted takeback. Wrong-turn click does nothing.
+**Test Gate** ✅ Checkmate, timeout, resignation, draw, takeback all work end-to-end.
 
 ---
 
 ## ✅ Phase 3 — Persistence + Auth
 
-**Goal**: Users have persistent identity; games are stored in a database.
+- [x] Prisma + PostgreSQL — `User` and `Game` models with proper indexes
+- [x] `AuthService` — register (bcrypt), login, JWT issue, verifyToken
+- [x] `requireAuth` middleware + auth router (`/api/auth/*`)
+- [x] `HistoryService` + history router (`/api/games/:id`, `/api/users/:id/games`)
+- [x] Express HTTP + WebSocket on same port (HTTP upgrade)
+- [x] `Game.ts` accepts whiteUserId/blackUserId, saves to DB on game end
+- [x] `SocketManager` extracts JWT from WS query param `?token=`
+- [x] Frontend: `authSlice`, `api/client.ts` (axios + JWT), Login/Register screens, `ProtectedRoute`
 
-- [x] Install Prisma (v5, SQLite for dev — swap `provider` to `postgresql` for prod)
-- [x] `prisma/schema.prisma` — User, Game models; `prisma migrate dev --name init` applied
-- [x] `shared/db/prisma.ts` — PrismaClient singleton
-- [x] `modules/auth/AuthService.ts` — register (bcrypt), login, verifyToken (JWT 7d)
-- [x] `modules/auth/authMiddleware.ts` — `requireAuth` Express middleware
-- [x] `modules/auth/authRouter.ts` — `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`
-- [x] `modules/history/HistoryService.ts` — saveGame, getGame, getUserGames
-- [x] `modules/history/historyRouter.ts` — `GET /api/games/:id`, `GET /api/users/:id/games`
-- [x] `server.ts` — Express + WebSocket on same port (HTTP upgrade); CORS for localhost:5173
-- [x] `Game.ts` — accepts whiteUserId/blackUserId; saves to DB in endGame if any player authenticated
-- [x] `SocketManager.ts` — extracts JWT from WS query param `?token=`, maps socket → userId
-- [x] `MatchmakingService.ts` — passes userId through to Game creation
-- [x] Frontend: `authSlice` (token + user in Redux + localStorage)
-- [x] Frontend: `api/client.ts` — axios instance with auto Bearer token
-- [x] Frontend: `screens/Login.tsx`, `screens/Register.tsx`
-- [x] Frontend: `components/ProtectedRoute.tsx` — redirects to /login if no token
-- [x] Frontend: `App.tsx` — `/login`, `/register` routes; `/game` is protected
-- [x] Frontend: `useSocket.ts` — appends `?token=...` to WS URL when logged in
-- [x] Frontend: `Game.tsx` navbar — shows username + rating + Sign Out button
-
-**Test Gate** ✅ Both sides typecheck clean. Register → login → play game → check `GET /api/users/:id/games` returns the completed game.
+**Test Gate** ✅ Register → login → play → `/api/users/:id/games` returns the completed game.
 
 ---
 
 ## ✅ Phase 4 — Smart Matchmaking + Reconnection
 
-**Goal**: Production-quality matchmaking; no more lost games on disconnect.
+- [x] `EloService.ts` — FIDE K-factor (K=40/<30, K=20/<100, K=10/stable), min rating 100
+- [x] `HistoryService.saveGame()` returns `{ ratingUpdates }` after Elo calc
+- [x] Rated matchmaking queue with widening rating window (±100 → ±500 over 100 s)
+- [x] Random color assignment, self-match prevention
+- [x] `Game.replaceSocket()` + `getResumePayload()` → `GAME_RESUME` message
+- [x] `SocketManager` 30-second grace period for authenticated players
+- [x] Anonymous disconnect → immediate resign
+- [x] Rematch flow with color swap
+- [x] Frontend handles `GAME_RESUME`, `RATING_UPDATE`, rematch modal, opponent-disconnected overlay
 
-- [x] `modules/rating/EloService.ts` — K-factor Elo (K=40/<30g, K=20/<100g, K=10/stable), min rating 100
-- [x] Prisma migration `add_games_count` — `gamesCount Int @default(0)` on User for K-factor
-- [x] `HistoryService.saveGame()` — calculates + saves Elo deltas after each rated game; returns `{ ratingUpdates }`
-- [x] `Game.ts` — sends `RATING_UPDATE` to each player after DB save; `safeSend()` guards on closed sockets
-- [x] `MatchmakingService.ts` — multi-player rated queue per time control; window starts at ±100, expands ±50 every 10 s up to ±500; random colour assignment; self-match prevention
-- [x] `SocketManager.handleInitGameAsync()` — fetches current rating from DB before enqueuing
-- [x] `Game.ts` — `replaceSocket(userId, newSocket)`, `getResumePayload(userId)` → `GAME_RESUME` message
-- [x] `GameService.findGameByUserId(userId)` — finds active game for reconnecting user
-- [x] `SocketManager.addUser()` — auto-resumes active game on reconnect; clears grace timer
-- [x] `SocketManager.removeUser()` — 30 s grace period for authenticated players; opponent alerted; anonymous → resign immediately
-- [x] `Game.ts` — `requestRematch / acceptRematch / rejectRematch`; colors swapped on rematch
-- [x] `GameService.createGame()` — wires `onRematch` callback so rematch creates a new game via same service
-- [x] `message.schema.ts` — Zod schemas for `REMATCH_REQUEST / ACCEPT / REJECT`
-- [x] `SocketManager` — routes `REMATCH_*` messages to Game methods
-- [x] Frontend `authSlice` — `updateRating(newRating)` action; syncs localStorage
-- [x] Frontend `gameSlice` — added `gameId`, `pendingRematchRequest`, `ratingChange` state
-- [x] Frontend `Game.tsx` — handles `GAME_RESUME` (full state restore), `RATING_UPDATE` (live rating in navbar), `REMATCH_*`; opponent-disconnected overlay on board; Rematch + New Game buttons in post-game panel; incoming rematch modal
-- [x] Both sides typecheck clean (`tsc --noEmit` passes with zero errors)
-
-**Test Gate**: ✅ Close browser tab mid-game, reopen — game resumes from correct position. After game ends, both players see updated rating. Rematch request flows correctly.
+**Test Gate** ✅ Close tab mid-game, reopen, game resumes. Ratings update post-game. Rematch creates a new game with swapped colors.
 
 ---
 
-## ⏳ Phase 5 — Redis + Horizontal Scaling
+## ✅ Phase 5 — Infrastructure (partial — see below)
 
-**Goal**: Multi-instance ready; stateless servers.
+### Done
 
-- [ ] Move active game state to Redis (`game:{gameId}` → JSON)
+- [x] **Docker** — multi-stage backend Dockerfile, nginx-based frontend, PostgreSQL container
+- [x] `docker-compose.yml` (prod-representative) + `docker-compose.override.yml` (local dev)
+- [x] `entrypoint.sh` — runs `prisma migrate deploy` before starting Node
+- [x] Non-root container user, `dumb-init` PID 1 for signal handling
+- [x] **Health checks** — `GET /health` (shallow) + `GET /health/deep` (DB + WS + matchmaking)
+- [x] **Prometheus metrics** — 8 metrics + Node defaults, isolated registry, `/metrics` endpoint
+- [x] **Tests** — Vitest + supertest, 119 tests across unit + integration
+- [x] **CI** — GitHub Actions: lint, typecheck, test, build on every PR
+- [x] **Docs restructure** — split into `docs/` (ARCHITECTURE, DEPLOYMENT, CONTRIBUTING, PROTOCOL, OBSERVABILITY)
+
+### Not yet (originally Phase 5)
+
+- [ ] Redis-backed active game state (multi-instance horizontal scaling)
 - [ ] Redis Pub/Sub for cross-instance WS message routing
-- [ ] Run 2 backend instances behind Nginx (`ip_hash` sticky sessions)
-- [ ] `GET /health` endpoint
+- [ ] Run multiple backend instances behind nginx (`ip_hash` sticky sessions)
 
-**Test Gate**: Two backend instances running; players on different instances play the same game.
+**Test Gate (for Redis work)**: Two backend instances; players on different instances play the same game.
 
 ---
 
 ## ⏳ Phase 6 — Spectators + Leaderboard
 
-**Goal**: Discovery and audience features.
-
 - [ ] Spectator mode — join any live game read-only
-- [ ] `GET /games/live` — list all in-progress games
-- [ ] `GET /leaderboard` — top players by rating
+- [ ] `GET /api/games/live` — list in-progress games
+- [ ] `GET /api/leaderboard` — top players by rating
 - [ ] Frontend: leaderboard screen, "Watch" button on live games
 
 ---
 
-## ⏳ Phase 7 — Docker + Kubernetes
+## ⏳ Phase 7 — Kubernetes
 
-**Goal**: Deployable, demonstrates production systems knowledge.
+Docker is done; K8s manifests still pending.
 
-- [ ] `backend/Dockerfile`
-- [ ] Root `docker-compose.yml` — server + PostgreSQL + Redis
-- [ ] `infra/k8s/` — Deployment, Service, Ingress, ConfigMap, Secret manifests
+- [ ] `infra/k8s/` — Deployment, Service, Ingress, ConfigMap, Secret
 - [ ] Run on minikube locally
-- [ ] `.github/workflows/ci.yml` — lint → typecheck → test → build Docker image
-- [ ] README with architecture diagram and "how I'd scale this" section
+- [ ] HPA on backend CPU/connection count
+- [ ] PostgreSQL via Bitnami chart or managed service
 
 **Test Gate**: `kubectl apply -f infra/k8s/` on minikube — full stack comes up, game playable.
 
@@ -171,11 +124,7 @@
 
 ## ⏳ Phase 8 — Extract First Microservice (Optional)
 
-**Goal**: Real microservice boundary on resume.
-
-- [ ] Move `modules/matchmaking/` into its own repo / deployable
-- [ ] Inter-service communication via gRPC or Redis events
-- [ ] Deploy as separate Kubernetes service
-- [ ] Document trade-offs (latency, ops complexity) in README
-
-**Test Gate**: Two services deployed independently; players still match correctly.
+- [ ] Move `modules/matchmaking/` into its own repo
+- [ ] Inter-service comms via Redis events or gRPC
+- [ ] Deploy as separate K8s service
+- [ ] Document trade-offs in [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)

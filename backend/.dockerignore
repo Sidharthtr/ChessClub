@@ -7,3 +7,5 @@ prisma/dev.db-journal
 .git
 .gitignore
 *.md
+tsconfig.tsbuildinfo
+src/__tests__

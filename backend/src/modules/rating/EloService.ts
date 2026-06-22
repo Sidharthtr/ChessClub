@@ -1,3 +1,25 @@
+/**
+ * EloService.ts — FIDE-style Elo rating calculation (pure functions, no I/O).
+ *
+ * calculateElo() takes the current ratings and game counts of both players,
+ * the game outcome, and returns the new ratings + point changes for each player.
+ *
+ * K-FACTOR (determines how much a single result shifts the rating):
+ *  K=40 for the first 30 games  — ratings move fast while establishing rank
+ *  K=20 for games 30–100        — moderate adjustment period
+ *  K=10 for 100+ games          — stable, established rating
+ *
+ * FLOOR: Ratings never drop below 100.
+ *
+ * HOW IT CONNECTS:
+ *  - HistoryService.saveGame() calls calculateElo() after persisting the game
+ *    and uses the returned RatingResult to update both users in the DB
+ *  - Game.ts receives the RatingResult from HistoryService and sends
+ *    RATING_UPDATE messages to both players
+ *  - Unit tests in EloService.test.ts cover edge cases (win/lose/draw, K-factor
+ *    transitions, rating floor)
+ */
+
 export interface RatingResult {
   whiteNewRating: number;
   blackNewRating: number;

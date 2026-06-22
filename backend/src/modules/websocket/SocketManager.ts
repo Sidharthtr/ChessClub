@@ -1,3 +1,26 @@
+/**
+ * SocketManager.ts — Central hub for all WebSocket connections.
+ *
+ * Owns the lifecycle of every client socket: authentication on connect, message
+ * parsing + validation, routing to the right Game method, graceful disconnection
+ * handling (30-second reconnection window before the game is forfeited).
+ *
+ * LIFECYCLE:
+ *  1. server.ts calls addUser(ws, req) on every new WebSocket connection
+ *  2. addUser() extracts the JWT from the ?token= query param (unauthenticated = guest)
+ *  3. addUser() checks for an in-progress game and sends a GAME_RESUME if one exists
+ *  4. handleMessages() binds the 'message' listener that validates + routes all messages
+ *  5. server.ts calls removeUser(ws) on 'close' — starts the 30-s grace period for auth users
+ *
+ * HOW IT CONNECTS:
+ *  - server.ts: addUser() / removeUser() called directly
+ *  - GameService: all game lookups (findGame, findGameByUserId) and createGame via matchmaking
+ *  - MatchmakingService: handleInitGame() and removePendingUser()
+ *  - authService.verifyToken(): reads the ?token= query param on connect
+ *  - healthRouter: getStats() provides connectedClients / activeGames / queuedPlayers
+ *  - Prometheus: activeConnections gauge, reconnectsTotal counter
+ */
+
 import { WebSocket } from 'ws';
 import type { IncomingMessage } from 'http';
 import { URL } from 'url';
@@ -9,6 +32,7 @@ import { sendError, handleWsError } from '../../shared/errors/errorHandler';
 import { authService } from '../auth/AuthService';
 import { prisma } from '../../shared/db/prisma';
 import { logger } from '../../shared/utils/logger';
+import { activeConnections, reconnectsTotal } from '../metrics/metrics';
 
 const GRACE_PERIOD_MS = 30_000;
 
@@ -25,10 +49,19 @@ export class SocketManager {
     this.matchmakingService = new MatchmakingService(this.gameService);
   }
 
+  getStats(): { connectedClients: number; activeGames: number; queuedPlayers: number } {
+    return {
+      connectedClients: this.users.length,
+      activeGames: this.gameService.getActiveCount(),
+      queuedPlayers: this.matchmakingService.getQueuedPlayerCount(),
+    };
+  }
+
   addUser(socket: WebSocket, req: IncomingMessage): void {
     const meta = this.extractMeta(req);
     this.socketMeta.set(socket, meta);
     this.users.push(socket);
+    activeConnections.inc();
 
     if (meta.userId) {
       // Cancel grace period if this is a reconnection
@@ -50,6 +83,7 @@ export class SocketManager {
             JSON.stringify({ type: MessageType.GAME_ALERT, payload: 'Opponent reconnected.' }),
           );
         }
+        reconnectsTotal.inc();
         logger.info({ gameId: activeGame.gameId, userId: meta.userId }, 'game_resumed');
       }
     }
@@ -60,6 +94,7 @@ export class SocketManager {
 
   removeUser(socket: WebSocket): void {
     this.users = this.users.filter((u) => u !== socket);
+    activeConnections.dec();
     this.matchmakingService.removePendingUser(socket);
 
     const meta = this.socketMeta.get(socket);

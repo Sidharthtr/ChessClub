@@ -1,0 +1,300 @@
+# ChessClub CI — runs on every pull request to main.
+#
+# Stages run in parallel where possible. The PR is blocked if any job fails.
+#
+#   1. install     — npm ci on root, backend, frontend (cached)
+#   2. typecheck   — backend and frontend in parallel
+#   3. lint        — backend and frontend in parallel
+#   4. test        — backend unit + integration (vitest)
+#   5. build       — backend (tsc) + frontend (vite) in parallel
+#
+# Caching strategy:
+#   - actions/setup-node@v4 caches the npm download cache
+#   - We cache node_modules at all three locations keyed on each package-lock.json
+#   - First PR install: ~60–90 s; subsequent PRs reusing cache: ~10–15 s
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel an in-progress run if the PR is updated — saves CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ─── Install once, share node_modules with downstream jobs ────────────────
+  install:
+    name: Install dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Cache root node_modules
+        id: cache-root
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-root-${{ hashFiles('package-lock.json') }}
+
+      - name: Cache backend node_modules
+        id: cache-backend
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-backend-${{ hashFiles('backend/package-lock.json') }}
+
+      - name: Cache frontend node_modules
+        id: cache-frontend
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-frontend-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install root dependencies
+        if: steps.cache-root.outputs.cache-hit != 'true'
+        run: npm ci --include=dev --ignore-scripts
+
+      - name: Install backend dependencies
+        if: steps.cache-backend.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: npm ci --include=dev
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Install frontend dependencies
+        if: steps.cache-frontend.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: npm ci --include=dev
+
+  # ─── Static checks ───────────────────────────────────────────────────────
+  typecheck-backend:
+    name: Typecheck backend
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-backend-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: backend
+        run: |
+          if [ ! -d node_modules ]; then
+            npm ci --include=dev
+            npx prisma generate
+          else
+            npx prisma generate
+          fi
+      - name: tsc --noEmit
+        working-directory: backend
+        run: npm run typecheck
+
+  typecheck-frontend:
+    name: Typecheck frontend
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-frontend-${{ hashFiles('frontend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: frontend
+        run: |
+          if [ ! -d node_modules ]; then npm ci --include=dev; fi
+      - name: tsc --noEmit
+        working-directory: frontend
+        run: npm run typecheck
+
+  lint-backend:
+    name: Lint backend
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-backend-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: backend
+        run: |
+          if [ ! -d node_modules ]; then
+            npm ci --include=dev
+            npx prisma generate
+          fi
+      - name: ESLint
+        working-directory: backend
+        run: npm run lint
+
+  lint-frontend:
+    name: Lint frontend
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-frontend-${{ hashFiles('frontend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: frontend
+        run: |
+          if [ ! -d node_modules ]; then npm ci --include=dev; fi
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+
+  # ─── Tests ───────────────────────────────────────────────────────────────
+  test-backend:
+    name: Test backend
+    needs: [typecheck-backend, lint-backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-backend-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: backend
+        run: |
+          if [ ! -d node_modules ]; then
+            npm ci --include=dev
+            npx prisma generate
+          fi
+      - name: Vitest
+        working-directory: backend
+        run: npm test
+
+  # ─── Builds ──────────────────────────────────────────────────────────────
+  build-backend:
+    name: Build backend
+    needs: [typecheck-backend, lint-backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-backend-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: backend
+        run: |
+          if [ ! -d node_modules ]; then
+            npm ci --include=dev
+            npx prisma generate
+          else
+            npx prisma generate
+          fi
+      - name: tsc
+        working-directory: backend
+        run: npm run build
+      - name: Verify dist/ produced
+        working-directory: backend
+        run: test -f dist/server.js
+
+  build-frontend:
+    name: Build frontend
+    needs: [typecheck-frontend, lint-frontend]
+    runs-on: ubuntu-latest
+    env:
+      VITE_API_URL: /api
+      VITE_WS_URL: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-frontend-${{ hashFiles('frontend/package-lock.json') }}
+      - name: Install (cache miss safety net)
+        working-directory: frontend
+        run: |
+          if [ ! -d node_modules ]; then npm ci --include=dev; fi
+      - name: Vite build
+        working-directory: frontend
+        run: npm run build
+      - name: Verify dist/ produced
+        working-directory: frontend
+        run: test -f dist/index.html
+
+  # ─── Single status check — branch protection rule points at this ─────────
+  ci:
+    name: CI Result
+    needs:
+      - typecheck-backend
+      - typecheck-frontend
+      - lint-backend
+      - lint-frontend
+      - test-backend
+      - build-backend
+      - build-frontend
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report aggregate status
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] || \
+             [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "CI failed — one or more jobs did not pass."
+            exit 1
+          fi
+          echo "All checks passed."

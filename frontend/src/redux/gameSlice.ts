@@ -18,6 +18,10 @@ interface GameState {
   pendingDrawRequest: boolean;
   pendingTakebackRequest: boolean;
   pendingRematchRequest: boolean;
+  // True while we've sent a rematch request and are waiting for the opponent
+  // to accept/reject. Drives the "Waiting for opponent..." UI on the requester
+  // side — without it the requester sees no feedback after clicking Rematch.
+  outgoingRematch: boolean;
   clockWhiteMs: number | null;
   clockBlackMs: number | null;
   ratingChange: number | null;
@@ -42,6 +46,7 @@ const initialState: GameState = {
   pendingDrawRequest: false,
   pendingTakebackRequest: false,
   pendingRematchRequest: false,
+  outgoingRematch: false,
   clockWhiteMs: null,
   clockBlackMs: null,
   ratingChange: null,
@@ -91,6 +96,9 @@ const gameSlice = createSlice({
     setPendingRematch(state, action: PayloadAction<boolean>) {
       state.pendingRematchRequest = action.payload;
     },
+    setOutgoingRematch(state, action: PayloadAction<boolean>) {
+      state.outgoingRematch = action.payload;
+    },
     setRatingChange(state, action: PayloadAction<number | null>) {
       state.ratingChange = action.payload;
     },
@@ -111,6 +119,7 @@ const gameSlice = createSlice({
       state.pendingDrawRequest = false;
       state.pendingTakebackRequest = false;
       state.pendingRematchRequest = false;
+      state.outgoingRematch = false;
       state.clockWhiteMs = null;
       state.clockBlackMs = null;
       state.ratingChange = null;
@@ -140,6 +149,7 @@ export const {
   setPendingDraw,
   setPendingTakeback,
   setPendingRematch,
+  setOutgoingRematch,
   setRatingChange,
   setFenFromServer,
   resetGame,

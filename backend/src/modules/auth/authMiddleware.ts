@@ -1,3 +1,20 @@
+/**
+ * authMiddleware.ts — Express middleware that enforces JWT authentication.
+ *
+ * requireAuth extracts the Bearer token from the Authorization header,
+ * verifies it via AuthService.verifyToken(), and attaches userId + username
+ * to the request object (AuthRequest interface).
+ *
+ * If the header is missing, malformed, or the token is invalid/expired,
+ * it responds with 401 immediately — the route handler is never called.
+ *
+ * HOW IT CONNECTS:
+ *  - authRouter applies requireAuth to GET /me and GET /games
+ *  - historyRouter applies requireAuth to all endpoints
+ *  - AuthRequest extends Express.Request with userId? and username?
+ *    so downstream handlers have typed access to the authenticated user
+ */
+
 import type { Request, Response, NextFunction } from 'express';
 import { authService } from './AuthService';
 

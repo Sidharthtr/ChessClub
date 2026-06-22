@@ -1,3 +1,24 @@
+/**
+ * AuthService.ts — User registration, login, and JWT verification.
+ *
+ * All passwords are hashed with bcrypt (cost=10) before storage. JWTs are
+ * signed with HMAC-SHA256 using the JWT_SECRET env var and expire in 7 days.
+ *
+ * METHODS:
+ *  register(username, email, password) — creates a new user, returns { user, token }
+ *  login(email, password)              — verifies credentials, returns { user, token }
+ *  getMe(userId)                       — fetches safe user profile (no passwordHash)
+ *  verifyToken(token)                  — decodes + verifies JWT, throws on invalid/expired
+ *
+ * HOW IT CONNECTS:
+ *  - authRouter uses all four methods for HTTP endpoints
+ *  - SocketManager.extractMeta() calls verifyToken() on the ?token= WS query param
+ *    so authenticated players can reconnect to in-progress games
+ *  - prisma.ts provides the PrismaClient for all DB queries
+ *  - AppError (shared/errors/AppError.ts) is thrown for domain errors (409 duplicate,
+ *    401 wrong password, 404 user not found)
+ */
+
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../shared/db/prisma';

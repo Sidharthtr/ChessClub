@@ -1,5 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" → the platform `prisma generate` was run on (used in local dev).
+  // "linux-musl-openssl-3.0.x" → Alpine Linux 3.16+ with OpenSSL 3 (Docker prod).
+  // Without this, Prisma tries to download the engine at runtime and fails
+  // because the non-root container user has no write access to node_modules.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -7,34 +12,55 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum GameWinner {
+  white
+  black
+}
+
+enum GameOverReason {
+  checkmate
+  stalemate
+  draw_by_repetition
+  draw_by_insufficient_material
+  draw_by_50_move_rule
+  draw_by_agreement
+  resignation
+  timeout
+}
+
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  email        String   @unique
+  id           String    @id @default(cuid())
+  username     String    @unique
+  email        String    @unique
   passwordHash String
-  rating       Int      @default(1200)
-  gamesCount   Int      @default(0)
-  createdAt    DateTime @default(now())
+  rating       Int       @default(1200)
+  gamesCount   Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
 
   gamesAsWhite Game[] @relation("WhitePlayer")
   gamesAsBlack Game[] @relation("BlackPlayer")
+
+  @@index([rating(sort: Desc)])
+  @@index([deletedAt])
 }
 
 model Game {
-  id            String   @id @default(cuid())
+  id            String         @id @default(cuid())
   whitePlayerId String?
   blackPlayerId String?
-  whitePlayer   User?    @relation("WhitePlayer", fields: [whitePlayerId], references: [id])
-  blackPlayer   User?    @relation("BlackPlayer", fields: [blackPlayerId], references: [id])
-  winner        String?
-  reason        String
+  whitePlayer   User?          @relation("WhitePlayer", fields: [whitePlayerId], references: [id], onDelete: SetNull)
+  blackPlayer   User?          @relation("BlackPlayer", fields: [blackPlayerId], references: [id], onDelete: SetNull)
+  winner        GameWinner?
+  reason        GameOverReason
   pgn           String
   finalFen      String
   timeControlMs Int
   startedAt     DateTime
-  endedAt       DateTime @default(now())
+  endedAt       DateTime       @default(now())
 
-  @@index([whitePlayerId])
-  @@index([blackPlayerId])
-  @@index([endedAt])
+  @@index([whitePlayerId, endedAt(sort: Desc)])
+  @@index([blackPlayerId, endedAt(sort: Desc)])
+  @@index([endedAt(sort: Desc)])
 }

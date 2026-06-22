@@ -1,3 +1,20 @@
+/**
+ * env.ts — Centralised environment variable configuration.
+ *
+ * All process.env reads happen here and nowhere else. Every other file imports
+ * `config` from this module so that:
+ *  - Defaults are applied in one place
+ *  - Tests can stub `config` instead of mocking process.env
+ *  - Missing-variable bugs surface immediately on startup
+ *
+ * VARIABLES:
+ *  PORT          — TCP port the HTTP/WS server listens on (default 8080)
+ *  NODE_ENV      — 'development' | 'production' | 'test'
+ *  JWT_SECRET    — HMAC key for signing JWTs (MUST be overridden in production)
+ *  DATABASE_URL  — Prisma connection string (default: SQLite dev.db)
+ *  CORS_ORIGIN   — Allowed origin for CORS (default: Vite dev server)
+ */
+
 import dotenv from 'dotenv';
 dotenv.config();
 

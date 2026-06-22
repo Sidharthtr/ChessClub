@@ -24,6 +24,22 @@ const ChessBoard: React.FC<{ socket?: WebSocket | null }> = ({ socket }) => {
   // Black plays from the bottom — flip when we're the black player
   const flipped = colour === 'black';
 
+  // When the side to move is in check, find their king's square so we can
+  // paint it red. chess.js doesn't expose the king position directly — scan
+  // the board for the king of the player whose turn it is.
+  const checkedKingSquare: Square | null = (() => {
+    if (!game.inCheck()) return null;
+    const sideToMove = game.turn();
+    for (const row of game.board()) {
+      for (const cell of row) {
+        if (cell && cell.type === 'k' && cell.color === sideToMove) {
+          return cell.square;
+        }
+      }
+    }
+    return null;
+  })();
+
   const makeMove = (move: { from: string; to: string }) => {
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: MessageType.MOVE, move }));
@@ -64,6 +80,17 @@ const ChessBoard: React.FC<{ socket?: WebSocket | null }> = ({ socket }) => {
 
             const isSelected = selectedSquare === squareId;
             const isDark = (i + j) % 2 !== 0;
+            const isCheckedKing = squareId === checkedKingSquare;
+
+            // Check highlight takes priority over selection highlight so the
+            // player can't miss it — the king is in danger right now.
+            const bgColor = isCheckedKing
+              ? '#e63946'
+              : isSelected
+                ? '#aaa23a'
+                : isDark
+                  ? '#b58863'
+                  : '#f0d9b5';
 
             return (
               <div
@@ -72,7 +99,8 @@ const ChessBoard: React.FC<{ socket?: WebSocket | null }> = ({ socket }) => {
                 style={{
                   width: boxSize,
                   height: boxSize,
-                  backgroundColor: isSelected ? '#aaa23a' : isDark ? '#b58863' : '#f0d9b5',
+                  backgroundColor: bgColor,
+                  boxShadow: isCheckedKing ? 'inset 0 0 20px rgba(0,0,0,0.4)' : undefined,
                 }}
                 className="square relative flex justify-center items-center cursor-pointer"
               >

@@ -19,6 +19,7 @@ import {
   setPendingDraw,
   setPendingTakeback,
   setPendingRematch,
+  setOutgoingRematch,
   setRatingChange,
   setFenFromServer,
 } from '../redux/gameSlice';
@@ -103,6 +104,7 @@ const Game = () => {
     clockBlackMs,
     opponentUsername,
     pendingRematchRequest,
+    outgoingRematch,
     ratingChange,
   } = useSelector((state: RootState) => state.game);
 
@@ -149,11 +151,17 @@ const Game = () => {
       const message = JSON.parse(event.data);
       switch (message.type) {
         case MessageType.INIT_GAME:
+          // Reset every stale piece of the previous game first — game-over
+          // overlay, winner, rating change, pending rematch flags. Without
+          // this the new game starts under the prior game's gameOver=true,
+          // so the requester stays stuck on the "Game Over" panel.
+          dispatch(resetGame());
           dispatch(setStartGame(true));
           dispatch(setColour(message.payload.color));
           dispatch(setGameId(message.payload.gameId));
           dispatch(setOpponentUsername(message.payload.opponentUsername ?? null));
           dispatch(setClock({ white: message.payload.timeMs, black: message.payload.timeMs }));
+          dispatch(setFenFromServer(new Chess().fen()));
           clockRefRef.current = {
             white: message.payload.timeMs,
             black: message.payload.timeMs,
@@ -221,7 +229,10 @@ const Game = () => {
           break;
 
         case MessageType.REMATCH_REJECT:
+          // Clear both sides: the incoming-request modal (if any) AND our own
+          // outgoing-wait state (in case the rejecter is responding to us).
           dispatch(setPendingRematch(false));
+          dispatch(setOutgoingRematch(false));
           break;
 
         case MessageType.GAME_ALERT:
@@ -466,12 +477,27 @@ const Game = () => {
                 )}
 
                 <div className="flex flex-col gap-2 w-full mt-2">
-                  <button
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-8 rounded-xl w-full transition-all text-sm"
-                    onClick={() => send(MessageType.REMATCH_REQUEST)}
-                  >
-                    ↺ Rematch
-                  </button>
+                  {outgoingRematch ? (
+                    <div className="flex flex-col items-center gap-2 py-2.5 px-4 rounded-xl bg-blue-900/40 border border-blue-700/50 w-full">
+                      <p className="text-blue-200 text-sm font-semibold">↺ Waiting for opponent…</p>
+                      <button
+                        className="text-xs text-gray-400 hover:text-gray-200 underline"
+                        onClick={() => dispatch(setOutgoingRematch(false))}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-8 rounded-xl w-full transition-all text-sm"
+                      onClick={() => {
+                        send(MessageType.REMATCH_REQUEST);
+                        dispatch(setOutgoingRematch(true));
+                      }}
+                    >
+                      ↺ Rematch
+                    </button>
+                  )}
                   <button
                     className="bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-8 rounded-xl w-full transition-all shadow-lg hover:shadow-green-500/20 text-sm"
                     onClick={handleNewGame}

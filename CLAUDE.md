@@ -1,107 +1,104 @@
-# ChessClub — Project Context
+# ChessClub — Agent Context
 
-## Overview
+This file is loaded into every Claude session. It tells the agent how the codebase is laid out and what conventions to follow. Detailed docs live in [docs/](docs/).
 
-Real-time multiplayer chess application. Backend is a **modular monolith** designed so each module (`game`, `matchmaking`, `auth`, `rating`) can be extracted into a standalone microservice later. Frontend is React + Redux + WebSocket.
+---
 
-## Tech Stack
+## What This Project Is
 
-| Layer           | Technology                                             |
-| --------------- | ------------------------------------------------------ |
-| Backend runtime | Node.js + TypeScript, `ts-node`                        |
-| WebSocket       | `ws` library                                           |
-| Chess engine    | `chess.js` (move validation, FEN, game-over detection) |
-| Validation      | `zod` (all incoming WS messages)                       |
-| Logging         | `pino` (JSON in prod, pretty in dev)                   |
-| Frontend        | React 18, Vite, Tailwind CSS                           |
-| State           | Redux Toolkit                                          |
-| Future DB       | PostgreSQL + Prisma (Phase 3)                          |
-| Future cache    | Redis (Phase 5)                                        |
-| Future infra    | Docker + Kubernetes (Phase 7)                          |
+Real-time multiplayer chess platform. **Modular monolith** — single deployable, organized for future microservice extraction. The backend owns all game logic; the frontend is a thin renderer.
+
+## Tech
+
+| Layer         | Tech                                                                 |
+| ------------- | -------------------------------------------------------------------- |
+| Backend       | Node.js + TypeScript · WebSocket (`ws`) · Express                    |
+| Chess         | `chess.js` (validation, FEN, game-over detection)                    |
+| Validation    | `zod` — every incoming WS message                                    |
+| Logging       | `pino` (JSON in prod, pretty in dev)                                 |
+| DB            | PostgreSQL · Prisma                                                  |
+| Auth          | JWT (`?token=` in WS URL or `Authorization: Bearer` header) · bcrypt |
+| Observability | `prom-client` (`/metrics`), `/health`, `/health/deep`                |
+| Frontend      | React 18 · Vite · Redux Toolkit · Tailwind                           |
+| Tests         | Vitest + supertest                                                   |
+| Infra         | Docker · docker-compose · nginx                                      |
+
+## Repo Layout (at a glance)
+
+```
+ChessClub/
+├── README.md
+├── CLAUDE.md                            ← you are here
+├── docs/                                ← all detailed docs live here
+│   ├── ARCHITECTURE.md
+│   ├── DEPLOYMENT.md
+│   ├── CONTRIBUTING.md
+│   ├── PROTOCOL.md
+│   └── OBSERVABILITY.md
+├── docker-compose.yml                   ← production-representative
+├── docker-compose.override.yml          ← local dev overrides (ports, hot reload)
+├── .github/workflows/ci.yml             ← lint, typecheck, test, build
+├── backend/
+│   ├── Dockerfile
+│   ├── prisma/                          ← schema + migrations
+│   ├── scripts/entrypoint.sh            ← runs `prisma migrate deploy` then `node dist/server.js`
+│   └── src/
+│       ├── server.ts                    ← http.Server + WebSocketServer + listen
+│       ├── app.ts                       ← Express app (no listen — supertest-friendly)
+│       ├── config/env.ts                ← all process.env reads
+│       ├── modules/
+│       │   ├── websocket/SocketManager.ts
+│       │   ├── game/{Game,GameService,chess-clock}.ts
+│       │   ├── matchmaking/MatchmakingService.ts
+│       │   ├── auth/{AuthService,authRouter,authMiddleware}.ts
+│       │   ├── history/{HistoryService,historyRouter}.ts
+│       │   ├── rating/EloService.ts
+│       │   ├── health/healthRouter.ts
+│       │   └── metrics/{metrics,metricsRouter}.ts
+│       ├── shared/{constants,schemas,errors,utils,db}/
+│       └── __tests__/{unit,integration}/
+└── frontend/
+    ├── Dockerfile
+    ├── nginx.conf                       ← proxies /api and /ws to backend
+    └── src/
+        ├── App.tsx
+        ├── api/client.ts                ← axios with JWT interceptor
+        ├── hooks/useSocket.ts           ← WebSocket connection manager
+        ├── redux/{authSlice,gameSlice}.ts
+        ├── screens/{Game,Login,Register}.tsx
+        ├── components/{ChessBoard,GameControls,ProtectedRoute}/
+        └── shared/constants/messageTypes.ts  ← mirrors backend enum
+```
+
+For module responsibilities and request flows see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
+## Conventions (Strict)
+
+- **All WS messages validated via Zod** before any processing — invalid → `sendError()`, server never crashes
+- **Structured logging only**: `logger.info({ gameId, event }, 'event_name')` — context object FIRST, message string SECOND. No `console.log`.
+- **Game identified by UUID**, never by socket reference — `GameService.findGameById()` and `findGameByUserId()` are reconnection-safe
+- **Server-authoritative clock** — client never controls time. `ChessClock` uses `Date.now()` deltas
+- **No silent failures** — every bad client message gets an explicit `MessageType.ERROR` reply
+- **Single source of truth for message types** — backend enum + frontend `as const` object must match exactly
+- **Tests under `src/__tests__/`**, mirroring the module tree
 
 ## Running the Project
 
 ```bash
-# Backend — starts on ws://localhost:8080
-cd backend && npm install && npm start
-
-# Frontend — starts on http://localhost:5173
-cd frontend && npm install && npm run dev
+# Docker (recommended)
+cp .env.example .env
+docker compose up --build
+# App at http://localhost
 ```
 
-## Backend Architecture
-
-### Entry & Config
-
-- `src/server.ts` — creates WebSocketServer, hands connections to SocketManager
-- `src/config/env.ts` — all env vars with defaults (PORT, NODE_ENV, JWT_SECRET)
-
-### Modules (each = future microservice boundary)
-
-- `modules/websocket/SocketManager.ts` — manages all WS connections, parses + validates messages with Zod, routes to services
-- `modules/game/Game.ts` — domain entity: chess board (chess.js), clock, move logic, resign/draw/takeback
-- `modules/game/GameService.ts` — owns the active `Game[]` list; `findGame(socket)` and `findGameById(id)`
-- `modules/game/chess-clock.ts` — server-authoritative chess clock per game
-- `modules/matchmaking/MatchmakingService.ts` — pairs waiting players into Games
-
-### Stubs (empty, implemented in later phases)
-
-- `modules/auth/` — Phase 3: JWT auth
-- `modules/rating/` — Phase 4: Elo rating
-- `modules/history/` — Phase 4: game history + PGN export
-
-### Shared
-
-- `shared/constants/messageTypes.ts` — `MessageType` enum — **single source of truth** for all WS message type strings
-- `shared/constants/timeControls.ts` — time control presets (BULLET, BLITZ, RAPID, CLASSICAL)
-- `shared/schemas/message.schema.ts` — Zod discriminated union for every valid incoming message
-- `shared/errors/AppError.ts` — `AppError`, `ValidationError`, `GameError`
-- `shared/errors/errorHandler.ts` — `sendError(socket, msg)` and `handleWsError(socket, err)`
-- `shared/utils/logger.ts` — Pino instance (pretty in dev, JSON in prod)
-- `shared/utils/generateGameId.ts` — `crypto.randomUUID()` wrapper
-
-## Frontend Architecture
-
-- `src/hooks/useSocket.ts` — creates and manages the WebSocket connection
-- `src/redux/gameSlice.ts` — all game state: FEN, colour, gameOver, winner, gameOverReason, pendingDraw, pendingTakeback
-- `src/screens/Game.tsx` — main screen; handles all WS messages, dispatches to Redux
-- `src/components/ChessBoard/Chessboard.tsx` — renders board; enforces turn (only own pieces clickable on own turn)
-- `src/components/GameControls/` — Resign / Offer Draw / Request Takeback buttons + accept/reject modals
-- `src/shared/constants/messageTypes.ts` — mirrors backend enum values (plain `as const` object)
-
-## WebSocket Protocol
-
-All messages: `JSON.stringify({ type: MessageType.X, ...payload })`
-
-| Type               | Direction | Payload                                          |
-| ------------------ | --------- | ------------------------------------------------ |
-| `init_game`        | C→S       | _(none)_                                         |
-| `init_game`        | S→C       | `{ color, gameId, timeMs }`                      |
-| `move`             | C→S       | `{ move: { from, to, promotion? } }`             |
-| `move`             | S→C       | `{ payload: { move, clock: { white, black } } }` |
-| `game_over`        | S→C       | `{ winner: 'white'\|'black'\|null, reason }`     |
-| `game_alert`       | S→C       | `{ payload: string }`                            |
-| `resign`           | C→S       | _(none)_                                         |
-| `draw_request`     | C→S       | _(none)_                                         |
-| `draw_request`     | S→C       | _(forwarded to opponent)_                        |
-| `draw_accept`      | C→S       | _(none)_                                         |
-| `draw_reject`      | C→S / S→C | _(none)_                                         |
-| `takeback_request` | C→S       | _(none)_                                         |
-| `takeback_request` | S→C       | _(forwarded to opponent)_                        |
-| `takeback_accept`  | C→S       | _(none)_                                         |
-| `takeback_accept`  | S→C       | `{ fen, moveCount }`                             |
-| `takeback_reject`  | C→S / S→C | _(none)_                                         |
-| `error`            | S→C       | `{ message: string }`                            |
-
-## Conventions
-
-- **All WS messages validated via Zod** before any processing — invalid shape → `sendError()`, server never crashes
-- **Structured logging**: `logger.info({ gameId, event }, 'event_name')` — always attach context object first
-- **Game identified by UUID**, not socket reference — `GameService.findGameById(id)` is reconnection-safe
-- **Server-authoritative clock** — client never controls time; clock in `Game.ts` uses `Date.now()` deltas
-- **No silent failures** — every bad message gets an explicit `MessageType.ERROR` response back to the client
-- **Single source of truth for message types** — backend uses `MessageType` enum; frontend mirrors same strings as `as const` object
+For local dev without Docker see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md#running-locally-without-docker).
 
 ## Current Phase
 
-→ See [.claude/plan.md](.claude/plan.md) for phase tracking with checkmarks
+→ See [.claude/plan.md](.claude/plan.md) for phase tracking.
+
+**Implemented**: Phases 0–4 (gameplay, auth, persistence, reconnection, rematch, rating) + Docker infra + health checks + Prometheus metrics + 119 tests + CI pipeline.
+
+**Not yet**: Redis-backed game state for multi-instance horizontal scaling (Phase 5), spectator mode + leaderboard (Phase 6), Kubernetes (was in Phase 7 — Docker is done; K8s manifests pending).

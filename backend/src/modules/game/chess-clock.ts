@@ -1,3 +1,28 @@
+/**
+ * chess-clock.ts — Server-authoritative chess clock.
+ *
+ * Tracks remaining time for both players using Date.now() deltas. The client
+ * NEVER controls time — it only receives clock snapshots from getSnapshot()
+ * embedded in every MOVE broadcast.
+ *
+ * SUPPORTS:
+ *  - Fischer increment: each player gains incrementMs after their move
+ *  - Takeback: undoMove() reverses the color switch so the clock reverts
+ *    to the pre-move state
+ *
+ * TIMEOUT:
+ *  Internally schedules a setTimeout for the active player's remaining time.
+ *  When it fires, onTimeout(loser) is called → Game.ts converts that to a
+ *  GAME_OVER message with winner = the OTHER player.
+ *
+ * HOW IT CONNECTS:
+ *  - Game.ts constructs ChessClock in the constructor with baseMs, increment, and onTimeout
+ *  - Game.makeMove() calls clock.recordMove() after a valid move
+ *  - Game.acceptTakeback() calls clock.undoMove()
+ *  - Game.endGame() calls clock.stop() to cancel the scheduled timeout
+ *  - clock.getSnapshot() is called on every move and embedded in the MOVE broadcast
+ */
+
 export type ClockColor = 'white' | 'black';
 
 export class ChessClock {

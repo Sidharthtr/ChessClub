@@ -1,3 +1,29 @@
+/**
+ * authRouter.ts — Express router for authentication endpoints.
+ *
+ * Mounted in app.ts at /api/auth.
+ *
+ * ENDPOINTS:
+ *  POST /api/auth/register  — create account, returns { user, token }
+ *  POST /api/auth/login     — verify credentials, returns { user, token }
+ *  GET  /api/auth/me        — get own profile (requires Bearer token)
+ *  GET  /api/auth/games     — get own game history shortcut (requires Bearer token)
+ *
+ * REQUEST VALIDATION:
+ *  RegisterSchema and LoginSchema are Zod objects validated before calling AuthService.
+ *  Invalid input → 400 with { error, details } — AuthService is never called.
+ *
+ * ERROR HANDLING:
+ *  AppError instances propagate their statusCode to res.status().
+ *  Unexpected errors → 500 with a generic message (details logged via Pino).
+ *
+ * HOW IT CONNECTS:
+ *  - app.ts mounts this router at /api/auth
+ *  - authMiddleware.requireAuth is applied to /me and /games
+ *  - AuthService handles all business logic
+ *  - historyService.getUserGames is called for the /games convenience endpoint
+ */
+
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';

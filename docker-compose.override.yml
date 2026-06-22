@@ -1,43 +1,29 @@
-# Local development overrides — applied automatically by Docker Compose on top of
-# docker-compose.yml when you run `docker compose up` without specifying a file.
+# Local development overrides — applied automatically by Docker Compose on top
+# of docker-compose.yml when you run `docker compose up` without -f flags.
 #
 # In production (CI/CD), use:
 #   docker compose -f docker-compose.yml up
 # to skip this file entirely.
+#
+# This file ONLY adds host-port exposures so you can curl/connect tools directly.
+# It does NOT override the production CMD — the container runs the compiled
+# JS just like in prod. If you want host-side hot-reload while editing backend
+# code, run the backend directly on the host with `npm start` and skip Docker
+# for the backend container.
 
 services:
 
   postgres:
-    # Expose PostgreSQL to the host so you can connect with a DB GUI (TablePlus,
-    # pgAdmin, DBeaver) or run `npx prisma studio` outside Docker.
+    # Expose PostgreSQL on the host so you can connect with a DB GUI
+    # (TablePlus, pgAdmin, DBeaver) or run `npx prisma studio` outside Docker.
     ports:
       - "5432:5432"
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      NODE_ENV: development
-      PORT:     8080
-    # Expose backend port for direct testing (curl, Postman, Insomnia)
+    # Expose backend port for direct testing (curl, Postman, /metrics, /health)
     ports:
       - "8080:8080"
-    # Hot reload: mount source so ts-node picks up changes without rebuilding.
-    # The node_modules override prevents the host node_modules from shadowing
-    # the container's (different OS, different native bindings).
-    volumes:
-      - ./backend/src:/app/src:ro
-      - /app/node_modules
-    # Override the production CMD to use ts-node for hot-reload dev experience
-    command: ["npx", "ts-node", "src/server.ts"]
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: /api
-        VITE_WS_URL:  ""
     ports:
       - "${FRONTEND_PORT:-80}:80"

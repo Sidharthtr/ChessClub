@@ -1,3 +1,27 @@
+/**
+ * Game.ts — Core chess game entity.
+ *
+ * Each Game instance represents one live chess match between two WebSocket clients.
+ * It owns:
+ *  - a chess.js Chess board (move validation, FEN, game-over detection)
+ *  - a server-authoritative ChessClock (never trusts the client for time)
+ *  - references to both player sockets (player1 = white, player2 = black)
+ *
+ * LIFECYCLE:
+ *  1. GameService.createGame() constructs a Game → constructor sends INIT_GAME to both players
+ *  2. SocketManager routes all incoming WS messages here (makeMove, resign, draw, takeback, rematch)
+ *  3. When the game ends, endGame() sends GAME_OVER to both players, saves history via HistoryService,
+ *     and fires the onEnd callback so GameService removes it from its active list
+ *  4. Reconnections: replaceSocket() swaps the socket reference; getResumePayload() sends current state
+ *
+ * HOW IT CONNECTS:
+ *  - Constructed by GameService.createGame()
+ *  - SocketManager.ts calls every public method (makeMove, resign, etc.)
+ *  - ChessClock fires onTimeout → calls endGame() here
+ *  - HistoryService.saveGame() called async from endGame() to persist result + update ratings
+ *  - Prometheus counters: gamesFinishedTotal, movesProcessedTotal, moveProcessingLatency
+ */
+
 import { Chess } from 'chess.js';
 import WebSocket from 'ws';
 import { MessageType } from '../../shared/constants/messageTypes';
@@ -7,8 +31,13 @@ import { generateGameId } from '../../shared/utils/generateGameId';
 import { logger } from '../../shared/utils/logger';
 import { DEFAULT_TIME_CONTROL } from '../../shared/constants/timeControls';
 import { historyService } from '../history/HistoryService';
+import { gamesFinishedTotal, movesProcessedTotal, moveProcessingLatency } from '../metrics/metrics';
 
 type GameStatus = 'active' | 'over';
+
+// How long after a game ends we keep its Game instance alive in GameService.
+// During this window the rematch buttons work; after it the game is GC'd.
+const REMATCH_WINDOW_MS = 60_000;
 
 type GameOverReason =
   | 'checkmate'
@@ -48,6 +77,11 @@ export class Game {
   private pendingDrawFrom: WebSocket | null = null;
   private pendingTakebackFrom: WebSocket | null = null;
   private pendingRematchFrom: WebSocket | null = null;
+  // Set when endGame() schedules cleanup. Cleared/cancelled if a rematch happens
+  // (so the old game can be removed immediately) or if cleanup actually runs.
+  // Keeps the game alive for REMATCH_WINDOW_MS so the rematch flow can still
+  // find it via gameService.findGame(socket).
+  private cleanupTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onEnd?: () => void;
   private readonly onRematch?: RematchCallback;
 
@@ -134,9 +168,13 @@ export class Game {
       return;
     }
 
+    // Start the latency timer AFTER turn validation — we only measure valid attempts
+    const endLatencyTimer = moveProcessingLatency.startTimer();
+
     try {
       this.board.move(move);
     } catch (e) {
+      endLatencyTimer(); // record even on invalid move so the histogram stays honest
       logger.warn({ gameId: this.gameId, move, error: e }, 'invalid_move');
       this.safeSend(
         socket,
@@ -155,6 +193,9 @@ export class Game {
     });
     this.safeSend(this.player1, movePayload);
     this.safeSend(this.player2, movePayload);
+
+    endLatencyTimer(); // stop timer after both sends complete
+    movesProcessedTotal.inc();
 
     logger.info({ gameId: this.gameId, move, moveCount: this.moveCount }, 'move_made');
 
@@ -298,7 +339,13 @@ export class Game {
 
   private triggerRematch(): void {
     this.pendingRematchFrom = null;
-    // Swap colors so players alternate sides
+    // The new game replaces this one — cancel the pending cleanup timer and
+    // remove the old game from GameService immediately.
+    if (this.cleanupTimer) {
+      clearTimeout(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+    // Swap colors so players alternate sides each rematch
     this.onRematch?.(
       this.player2,
       this.player1,
@@ -308,6 +355,7 @@ export class Game {
       this.whiteUsername,
       this.incrementMs,
     );
+    this.onEnd?.();
   }
 
   // ─── Reconnection ────────────────────────────────────────────────────────────
@@ -361,6 +409,9 @@ export class Game {
     this.safeSend(this.player2, gameOverPayload);
     logger.info({ gameId: this.gameId, winner, reason }, 'game_ended');
 
+    // Track every game completion by reason (checkmate, timeout, resignation, draw, etc.)
+    gamesFinishedTotal.inc({ reason });
+
     if (this.whiteUserId || this.blackUserId) {
       historyService
         .saveGame({
@@ -394,7 +445,13 @@ export class Game {
         });
     }
 
-    this.onEnd?.();
+    // Defer cleanup so the rematch UI has a window to act. Without this, the
+    // game is removed from GameService immediately and findGame(socket) returns
+    // undefined when the player clicks Rematch.
+    this.cleanupTimer = setTimeout(() => {
+      this.cleanupTimer = null;
+      this.onEnd?.();
+    }, REMATCH_WINDOW_MS);
   }
 
   private getGameOverReason(): GameOverReason {
