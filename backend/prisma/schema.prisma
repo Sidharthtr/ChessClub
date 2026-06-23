@@ -64,3 +64,27 @@ model Game {
   @@index([blackPlayerId, endedAt(sort: Desc)])
   @@index([endedAt(sort: Desc)])
 }
+
+// Snapshot of every live game, upserted after each move.
+// On server restart all rows are loaded and Game objects are reconstructed
+// with paused clocks so players can reconnect and resume.
+model ActiveGame {
+  id            String   @id
+  fen           String
+  pgn           String   @default("")
+  clockWhiteMs  Int
+  clockBlackMs  Int
+  turnColor     String   // 'w' | 'b' — chess.js convention
+  moveNumber    Int      @default(0)
+  whiteUserId   String?
+  blackUserId   String?
+  whiteUsername String?
+  blackUsername String?
+  timeControlMs Int
+  incrementMs   Int      @default(0)
+  startedAt     DateTime
+  updatedAt     DateTime @updatedAt
+
+  @@index([whiteUserId])
+  @@index([blackUserId])
+}

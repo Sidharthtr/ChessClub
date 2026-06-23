@@ -57,6 +57,11 @@ export class SocketManager {
     };
   }
 
+  /** Load in-progress games from the DB so players can reconnect after a crash. */
+  async restore(): Promise<void> {
+    await this.gameService.restoreFromDb();
+  }
+
   addUser(socket: WebSocket, req: IncomingMessage): void {
     const meta = this.extractMeta(req);
     this.socketMeta.set(socket, meta);
@@ -239,6 +244,13 @@ export class SocketManager {
     incrementMs: number | undefined,
     meta: { userId: string | null; username: string | null },
   ): Promise<void> {
+    // Prevent a reconnecting player from queuing for a second game while
+    // they already have one in progress (including crash-recovered games).
+    if (meta.userId && this.gameService.findGameByUserId(meta.userId)) {
+      sendError(socket, 'You already have an active game. Reconnecting…');
+      return;
+    }
+
     let rating = 1200;
     if (meta.userId) {
       const user = await prisma.user.findUnique({

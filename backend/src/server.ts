@@ -40,6 +40,20 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => socketManager.removeUser(ws));
 });
 
-httpServer.listen(config.port, () => {
-  logger.info({ port: config.port, env: config.nodeEnv }, 'server_started');
+// Keepalive ping every 30 s. Railway (and most cloud load balancers) close
+// TCP connections that are idle for ~180 s. A chess game with no moves for
+// 3 minutes would be silently dropped without this.
+const pingInterval = setInterval(() => {
+  wss.clients.forEach((client) => {
+    if (client.readyState === client.OPEN) client.ping();
+  });
+}, 30_000);
+httpServer.on('close', () => clearInterval(pingInterval));
+
+// Restore in-progress games from the DB before accepting connections so that
+// players who reconnect immediately after a restart find their game waiting.
+socketManager.restore().then(() => {
+  httpServer.listen(config.port, () => {
+    logger.info({ port: config.port, env: config.nodeEnv }, 'server_started');
+  });
 });

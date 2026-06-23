@@ -27,10 +27,12 @@ import WebSocket from 'ws';
 import { MessageType } from '../../shared/constants/messageTypes';
 import type { MovePayload } from './types';
 import { ChessClock } from './chess-clock';
+import type { ClockColor } from './chess-clock';
 import { generateGameId } from '../../shared/utils/generateGameId';
 import { logger } from '../../shared/utils/logger';
 import { DEFAULT_TIME_CONTROL } from '../../shared/constants/timeControls';
 import { historyService } from '../history/HistoryService';
+import { gameStateService, type ActiveGameSnapshot } from './GameStateService';
 import { gamesFinishedTotal, movesProcessedTotal, moveProcessingLatency } from '../metrics/metrics';
 
 type GameStatus = 'active' | 'over';
@@ -96,58 +98,100 @@ export class Game {
     blackUserId: string | null = null,
     whiteUsername: string | null = null,
     blackUsername: string | null = null,
+    /** If provided, restore board + clock from this snapshot (crash-recovery path). */
+    snapshot?: ActiveGameSnapshot,
   ) {
-    this.gameId = generateGameId();
     this.player1 = player1;
     this.player2 = player2;
     this.whiteUserId = whiteUserId;
     this.blackUserId = blackUserId;
     this.whiteUsername = whiteUsername;
     this.blackUsername = blackUsername;
-    this.board = new Chess();
-    this.startTime = new Date();
     this.timeControlMs = timeControlMs;
     this.incrementMs = incrementMs;
     this.onEnd = onEnd;
     this.onRematch = onRematch;
 
-    this.clock = new ChessClock(
-      timeControlMs,
-      (loser) => {
-        this.endGame(loser === 'white' ? 'black' : 'white', 'timeout');
-      },
-      incrementMs,
-    );
+    const clockTimeoutCb = (loser: ClockColor) => {
+      this.endGame(loser === 'white' ? 'black' : 'white', 'timeout');
+    };
 
-    this.safeSend(
-      this.player1,
-      JSON.stringify({
-        type: MessageType.INIT_GAME,
-        payload: {
-          color: 'white',
-          gameId: this.gameId,
-          timeMs: timeControlMs,
-          incrementMs,
-          opponentUsername: blackUsername,
-        },
-      }),
-    );
-    this.safeSend(
-      this.player2,
-      JSON.stringify({
-        type: MessageType.INIT_GAME,
-        payload: {
-          color: 'black',
-          gameId: this.gameId,
-          timeMs: timeControlMs,
-          incrementMs,
-          opponentUsername: whiteUsername,
-        },
-      }),
-    );
+    if (snapshot) {
+      // ── Recovery path ────────────────────────────────────────────────────
+      // Restore game state from the DB snapshot. No INIT_GAME is sent here;
+      // SocketManager.addUser() will detect the game and send GAME_RESUME
+      // when the player reconnects.
+      this.gameId = snapshot.id;
+      this.startTime = snapshot.startedAt;
+      this.moveCount = snapshot.moveNumber;
 
-    this.clock.start();
-    logger.info({ gameId: this.gameId, timeControlMs }, 'game_created');
+      // Restore board from PGN (preserves full move history) with FEN fallback
+      this.board = new Chess();
+      try {
+        if (snapshot.pgn) {
+          this.board.loadPgn(snapshot.pgn);
+        } else {
+          this.board = new Chess(snapshot.fen);
+        }
+      } catch {
+        this.board = new Chess(snapshot.fen);
+      }
+
+      // Clock is paused — no time is charged for server downtime.
+      // The first post-crash move triggers ChessClock.recordMove() which
+      // starts the clock from the persisted values.
+      this.clock = ChessClock.fromSnapshot(
+        snapshot.clockWhiteMs,
+        snapshot.clockBlackMs,
+        snapshot.turnColor === 'w' ? 'white' : 'black',
+        incrementMs,
+        clockTimeoutCb,
+      );
+
+      logger.info({ gameId: this.gameId }, 'game_recovered');
+    } else {
+      // ── Normal path ──────────────────────────────────────────────────────
+      this.gameId = generateGameId();
+      this.startTime = new Date();
+      this.board = new Chess();
+      this.clock = new ChessClock(timeControlMs, clockTimeoutCb, incrementMs);
+
+      this.safeSend(
+        this.player1,
+        JSON.stringify({
+          type: MessageType.INIT_GAME,
+          payload: {
+            color: 'white',
+            gameId: this.gameId,
+            timeMs: timeControlMs,
+            incrementMs,
+            opponentUsername: blackUsername,
+          },
+        }),
+      );
+      this.safeSend(
+        this.player2,
+        JSON.stringify({
+          type: MessageType.INIT_GAME,
+          payload: {
+            color: 'black',
+            gameId: this.gameId,
+            timeMs: timeControlMs,
+            incrementMs,
+            opponentUsername: whiteUsername,
+          },
+        }),
+      );
+
+      this.clock.start();
+
+      // Persist immediately so the game survives a crash before the first move
+      if (whiteUserId || blackUserId) {
+        gameStateService.persist(this.getStateSnapshot()).catch(() => {});
+      }
+
+      logger.info({ gameId: this.gameId, timeControlMs }, 'game_created');
+    }
   }
 
   makeMove(socket: WebSocket, move: MovePayload): void {
@@ -196,6 +240,11 @@ export class Game {
 
     endLatencyTimer(); // stop timer after both sends complete
     movesProcessedTotal.inc();
+
+    // Persist state after every valid move so a crash loses at most one move
+    if (this.whiteUserId || this.blackUserId) {
+      gameStateService.persist(this.getStateSnapshot()).catch(() => {});
+    }
 
     logger.info({ gameId: this.gameId, move, moveCount: this.moveCount }, 'move_made');
 
@@ -388,6 +437,26 @@ export class Game {
     return this.board.fen();
   }
 
+  getStateSnapshot(): ActiveGameSnapshot {
+    const clock = this.clock.getSnapshot();
+    return {
+      id: this.gameId,
+      fen: this.board.fen(),
+      pgn: this.board.pgn(),
+      clockWhiteMs: clock.white,
+      clockBlackMs: clock.black,
+      turnColor: this.board.turn(),
+      moveNumber: this.moveCount,
+      whiteUserId: this.whiteUserId,
+      blackUserId: this.blackUserId,
+      whiteUsername: this.whiteUsername,
+      blackUsername: this.blackUsername,
+      timeControlMs: this.timeControlMs,
+      incrementMs: this.incrementMs,
+      startedAt: this.startTime,
+    };
+  }
+
   // ─── Private helpers ─────────────────────────────────────────────────────────
 
   private safeSend(socket: WebSocket, data: string): void {
@@ -400,6 +469,10 @@ export class Game {
     if (this.status === 'over') return;
     this.status = 'over';
     this.clock.stop();
+
+    // Game is over — remove from ActiveGame immediately so it won't be
+    // restored on the next server restart.
+    gameStateService.remove(this.gameId).catch(() => {});
 
     const gameOverPayload = JSON.stringify({
       type: MessageType.GAME_OVER,

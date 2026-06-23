@@ -42,6 +42,24 @@ export class ChessClock {
     this.onTimeout = onTimeout;
   }
 
+  // Construct a paused clock from a crash-recovery snapshot.
+  // The clock remains paused (started = false) until the first post-crash move,
+  // so no time is charged for server downtime.
+  static fromSnapshot(
+    whiteMs: number,
+    blackMs: number,
+    activeColor: ClockColor,
+    incrementMs: number,
+    onTimeout: (loser: ClockColor) => void,
+  ): ChessClock {
+    const clock = new ChessClock(0, onTimeout, incrementMs);
+    clock.timeWhiteMs = whiteMs;
+    clock.timeBlackMs = blackMs;
+    clock.activeColor = activeColor;
+    // started = false, lastMoveTime = null — clock is paused
+    return clock;
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -50,7 +68,16 @@ export class ChessClock {
   }
 
   recordMove(): void {
-    if (!this.started || this.lastMoveTime === null) return;
+    if (!this.started) {
+      // First move after crash recovery — start the clock without deducting
+      // for the time the server was down (not the player's fault).
+      this.started = true;
+      this.activeColor = this.activeColor === 'white' ? 'black' : 'white';
+      this.lastMoveTime = Date.now();
+      this.scheduleTimeout();
+      return;
+    }
+    if (this.lastMoveTime === null) return;
     const elapsed = Date.now() - this.lastMoveTime;
     if (this.activeColor === 'white') {
       this.timeWhiteMs = Math.max(0, this.timeWhiteMs - elapsed + this.incrementMs);
