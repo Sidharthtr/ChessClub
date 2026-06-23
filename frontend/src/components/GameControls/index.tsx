@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import type { RootState } from '../../redux/store';
-import { setPendingDraw, setPendingTakeback } from '../../redux/gameSlice';
+import { setPendingDraw, setPendingTakeback, setOutgoingTakeback } from '../../redux/gameSlice';
 import { MessageType } from '../../shared/constants/messageTypes';
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
 
 const GameControls: React.FC<Props> = ({ socket }) => {
   const dispatch = useDispatch();
-  const { pendingDrawRequest, pendingTakebackRequest } = useSelector(
+  const { pendingDrawRequest, pendingTakebackRequest, outgoingTakeback } = useSelector(
     (state: RootState) => state.game,
   );
   const [confirmResign, setConfirmResign] = useState(false);
@@ -39,12 +39,22 @@ const GameControls: React.FC<Props> = ({ socket }) => {
         >
           🤝 Offer Draw
         </button>
-        <button
-          className="bg-gray-700 hover:bg-yellow-700 text-white text-sm font-semibold py-2 px-4 rounded-lg w-full transition-colors text-left"
-          onClick={() => send(MessageType.TAKEBACK_REQUEST)}
-        >
-          ↩ Request Takeback
-        </button>
+        {outgoingTakeback ? (
+          <div className="flex items-center gap-2 py-2 px-4 rounded-lg bg-yellow-900/40 border border-yellow-700/50 text-yellow-300 text-sm">
+            <span className="w-3 h-3 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            Waiting for opponent…
+          </div>
+        ) : (
+          <button
+            className="bg-gray-700 hover:bg-yellow-700 text-white text-sm font-semibold py-2 px-4 rounded-lg w-full transition-colors text-left"
+            onClick={() => {
+              send(MessageType.TAKEBACK_REQUEST);
+              dispatch(setOutgoingTakeback(true));
+            }}
+          >
+            ↩ Request Takeback
+          </button>
+        )}
       </div>
 
       {/* Resign confirmation */}

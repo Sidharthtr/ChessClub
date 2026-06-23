@@ -21,7 +21,7 @@ cd ChessClub
 # Install tooling at the root (eslint, prettier, husky)
 npm install
 
-# Backend deps
+# Backend dep
 cd backend && npm install && cd ..
 
 # Frontend deps

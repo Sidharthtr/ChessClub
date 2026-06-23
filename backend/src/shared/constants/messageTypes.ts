@@ -6,8 +6,8 @@
  * Changing a value here breaks the protocol — update the frontend mirror too.
  *
  * DIRECTION GUIDE:
- *  C→S (client to server): INIT_GAME, MOVE, RESIGN, DRAW_REQUEST, DRAW_ACCEPT,
- *       DRAW_REJECT, TAKEBACK_REQUEST, TAKEBACK_ACCEPT, TAKEBACK_REJECT,
+ *  C→S (client to server): INIT_GAME, CANCEL_SEARCH, MOVE, RESIGN, DRAW_REQUEST,
+ *       DRAW_ACCEPT, DRAW_REJECT, TAKEBACK_REQUEST, TAKEBACK_ACCEPT, TAKEBACK_REJECT,
  *       REMATCH_REQUEST, REMATCH_ACCEPT, REMATCH_REJECT
  *  S→C (server to client): INIT_GAME, MOVE, GAME_OVER, GAME_ALERT, ERROR,
  *       GAME_RESUME, RATING_UPDATE  (+ forwarded requests/accepts/rejects)
@@ -29,6 +29,8 @@ export enum MessageType {
   DRAW_ACCEPT = 'draw_accept',
   DRAW_REJECT = 'draw_reject',
   RESIGN = 'resign',
+  CANCEL_SEARCH = 'cancel_search',
+  SEARCH_TIMEOUT = 'search_timeout',
   // Phase 4
   GAME_RESUME = 'game_resume',
   REMATCH_REQUEST = 'rematch_request',

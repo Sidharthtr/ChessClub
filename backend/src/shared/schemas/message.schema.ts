@@ -45,6 +45,7 @@ export const IncomingMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal(MessageType.REMATCH_REQUEST) }),
   z.object({ type: z.literal(MessageType.REMATCH_ACCEPT) }),
   z.object({ type: z.literal(MessageType.REMATCH_REJECT) }),
+  z.object({ type: z.literal(MessageType.CANCEL_SEARCH) }),
 ]);
 
 export type IncomingMessage = z.infer<typeof IncomingMessageSchema>;

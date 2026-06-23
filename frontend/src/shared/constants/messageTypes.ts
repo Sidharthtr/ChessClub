@@ -11,6 +11,8 @@ export const MessageType = {
   TAKEBACK_REQUEST: 'takeback_request',
   TAKEBACK_ACCEPT: 'takeback_accept',
   TAKEBACK_REJECT: 'takeback_reject',
+  CANCEL_SEARCH: 'cancel_search',
+  SEARCH_TIMEOUT: 'search_timeout',
   // Phase 4
   GAME_RESUME: 'game_resume',
   REMATCH_REQUEST: 'rematch_request',

@@ -20,6 +20,7 @@ import {
   setPendingTakeback,
   setPendingRematch,
   setOutgoingRematch,
+  setOutgoingTakeback,
   setRatingChange,
   setFenFromServer,
 } from '../redux/gameSlice';
@@ -110,6 +111,7 @@ const Game = () => {
 
   const [selectedTcIdx, setSelectedTcIdx] = useState(0);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
+  const [searchTimedOut, setSearchTimedOut] = useState(false);
 
   // ── Timestamp-based clock ───────────────────────────────────────────────────
   // Store the last server clock snapshot + the moment it arrived.
@@ -218,10 +220,12 @@ const Game = () => {
         case MessageType.TAKEBACK_ACCEPT:
           dispatch(setFenFromServer(message.payload.fen));
           dispatch(setPendingTakeback(false));
+          dispatch(setOutgoingTakeback(false));
           break;
 
         case MessageType.TAKEBACK_REJECT:
           dispatch(setPendingTakeback(false));
+          dispatch(setOutgoingTakeback(false));
           break;
 
         case MessageType.REMATCH_REQUEST:
@@ -241,6 +245,11 @@ const Game = () => {
             if (message.payload.includes('reconnected')) setOpponentDisconnected(false);
           }
           break;
+
+        case MessageType.SEARCH_TIMEOUT:
+          dispatch(setWaiting(false));
+          setSearchTimedOut(true);
+          break;
       }
     };
   }, [socket, dispatch]);
@@ -253,6 +262,7 @@ const Game = () => {
 
   const startGame = () => {
     const tc = TIME_OPTIONS[selectedTcIdx];
+    setSearchTimedOut(false);
     dispatch(setWaiting(true));
     send(MessageType.INIT_GAME, { timeControlMs: tc.baseMs, incrementMs: tc.incrementMs });
   };
@@ -386,29 +396,39 @@ const Game = () => {
                   </select>
                 </div>
 
-                <button
-                  className={`font-bold py-3 rounded-xl w-full transition-all text-sm ${
-                    isWaiting
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-500 text-white shadow-lg hover:shadow-green-500/20'
-                  }`}
-                  onClick={startGame}
-                  disabled={isWaiting}
-                >
-                  {isWaiting ? (
-                    <span className="flex items-center justify-center gap-2">
+                {isWaiting ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-center gap-2 font-bold py-3 rounded-xl w-full bg-gray-700 text-gray-400 text-sm">
                       <span className="w-4 h-4 border-2 border-gray-500 border-t-gray-300 rounded-full animate-spin" />
                       Searching for opponent…
-                    </span>
-                  ) : (
-                    '▶  Play Now'
-                  )}
-                </button>
-
-                {isWaiting && (
-                  <p className="text-gray-500 text-xs text-center leading-relaxed">
-                    Waiting for a {TIME_OPTIONS[selectedTcIdx].label} opponent
-                  </p>
+                    </div>
+                    <button
+                      className="text-sm text-gray-400 hover:text-red-400 py-2 rounded-xl w-full transition-colors border border-gray-700 hover:border-red-700"
+                      onClick={() => {
+                        send(MessageType.CANCEL_SEARCH);
+                        dispatch(setWaiting(false));
+                      }}
+                    >
+                      Cancel Search
+                    </button>
+                    <p className="text-gray-500 text-xs text-center leading-relaxed">
+                      Waiting for a {TIME_OPTIONS[selectedTcIdx].label} opponent
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl w-full transition-all text-sm shadow-lg hover:shadow-green-500/20"
+                      onClick={startGame}
+                    >
+                      ▶ Play Now
+                    </button>
+                    {searchTimedOut && (
+                      <p className="text-yellow-500 text-xs text-center leading-relaxed">
+                        No opponent found after 1 minute. Try again.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             )}

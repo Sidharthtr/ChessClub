@@ -231,6 +231,10 @@ export class SocketManager {
           case MessageType.REMATCH_REJECT:
             this.gameService.findGame(socket)?.rejectRematch(socket);
             break;
+
+          case MessageType.CANCEL_SEARCH:
+            this.matchmakingService.removePendingUser(socket);
+            break;
         }
       } catch (error) {
         handleWsError(socket, error);

@@ -19,9 +19,10 @@
  *  never cross-match against each other.
  */
 
-import type { WebSocket } from 'ws';
+import { WebSocket } from 'ws';
 import type { GameService } from '../game/GameService';
 import { DEFAULT_TIME_CONTROL, tcKey } from '../../shared/constants/timeControls';
+import { MessageType } from '../../shared/constants/messageTypes';
 import { sendError } from '../../shared/errors/errorHandler';
 import { logger } from '../../shared/utils/logger';
 import { matchmakingQueueSize } from '../metrics/metrics';
@@ -33,6 +34,7 @@ interface QueueEntry {
   rating: number;
   enqueuedAt: number;
   timerId: ReturnType<typeof setInterval>;
+  searchTimeoutId: ReturnType<typeof setTimeout> | null;
   baseTimeMs: number;
   incrementMs: number;
 }
@@ -41,6 +43,7 @@ const INITIAL_WINDOW = 100;
 const WINDOW_EXPANSION = 50;
 const EXPANSION_INTERVAL_MS = 10_000;
 const MAX_WINDOW = 500;
+const SEARCH_TIMEOUT_MS = 60_000;
 
 export class MatchmakingService {
   // Queue key = tcKey(baseMs, incrementMs) so Rapid 10+0 and Rapid 10+5 never cross-match
@@ -69,6 +72,7 @@ export class MatchmakingService {
       rating,
       enqueuedAt: Date.now(),
       timerId: null!,
+      searchTimeoutId: null,
       baseTimeMs,
       incrementMs,
     };
@@ -84,6 +88,16 @@ export class MatchmakingService {
     }, EXPANSION_INTERVAL_MS);
 
     entry.timerId = timerId;
+
+    entry.searchTimeoutId = setTimeout(() => {
+      if (!this.findEntryBySocket(socket)) return; // already matched
+      this.dequeue(entry);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: MessageType.SEARCH_TIMEOUT }));
+      }
+      logger.info({ userId, baseTimeMs, incrementMs }, 'search_timed_out');
+    }, SEARCH_TIMEOUT_MS);
+
     this.getQueue(key).push(entry);
     matchmakingQueueSize.inc();
     logger.info({ baseTimeMs, incrementMs, rating, userId }, 'player_queued');
@@ -157,6 +171,7 @@ export class MatchmakingService {
 
   private dequeue(entry: QueueEntry): void {
     clearInterval(entry.timerId);
+    if (entry.searchTimeoutId) clearTimeout(entry.searchTimeoutId);
     for (const pool of this.queues.values()) {
       const idx = pool.indexOf(entry);
       if (idx !== -1) {

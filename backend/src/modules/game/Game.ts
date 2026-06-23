@@ -40,6 +40,7 @@ type GameStatus = 'active' | 'over';
 // How long after a game ends we keep its Game instance alive in GameService.
 // During this window the rematch buttons work; after it the game is GC'd.
 const REMATCH_WINDOW_MS = 60_000;
+const TAKEBACK_TIMEOUT_MS = 30_000;
 
 type GameOverReason =
   | 'checkmate'
@@ -78,6 +79,7 @@ export class Game {
   private clock: ChessClock;
   private pendingDrawFrom: WebSocket | null = null;
   private pendingTakebackFrom: WebSocket | null = null;
+  private takebackTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingRematchFrom: WebSocket | null = null;
   // Set when endGame() schedules cleanup. Cleared/cancelled if a rematch happens
   // (so the old game can be removed immediately) or if cleanup actually runs.
@@ -313,6 +315,17 @@ export class Game {
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     this.pendingTakebackFrom = socket;
     this.safeSend(opponent, JSON.stringify({ type: MessageType.TAKEBACK_REQUEST }));
+
+    this.takebackTimer = setTimeout(() => {
+      if (!this.pendingTakebackFrom) return;
+      this.pendingTakebackFrom = null;
+      this.takebackTimer = null;
+      const reject = JSON.stringify({ type: MessageType.TAKEBACK_REJECT });
+      this.safeSend(this.player1, reject);
+      this.safeSend(this.player2, reject);
+      logger.info({ gameId: this.gameId }, 'takeback_timed_out');
+    }, TAKEBACK_TIMEOUT_MS);
+
     logger.info({ gameId: this.gameId }, 'takeback_requested');
   }
 
@@ -330,6 +343,10 @@ export class Game {
     this.moveCount--;
     this.clock.undoMove();
     this.pendingTakebackFrom = null;
+    if (this.takebackTimer) {
+      clearTimeout(this.takebackTimer);
+      this.takebackTimer = null;
+    }
     const payload = JSON.stringify({
       type: MessageType.TAKEBACK_ACCEPT,
       payload: { fen: this.board.fen(), moveCount: this.moveCount },
@@ -344,6 +361,10 @@ export class Game {
     const opponent = socket === this.player1 ? this.player2 : this.player1;
     if (this.pendingTakebackFrom !== opponent) return;
     this.pendingTakebackFrom = null;
+    if (this.takebackTimer) {
+      clearTimeout(this.takebackTimer);
+      this.takebackTimer = null;
+    }
     this.safeSend(socket, JSON.stringify({ type: MessageType.TAKEBACK_REJECT }));
     this.safeSend(opponent, JSON.stringify({ type: MessageType.TAKEBACK_REJECT }));
     logger.info({ gameId: this.gameId }, 'takeback_rejected');
@@ -469,6 +490,10 @@ export class Game {
     if (this.status === 'over') return;
     this.status = 'over';
     this.clock.stop();
+    if (this.takebackTimer) {
+      clearTimeout(this.takebackTimer);
+      this.takebackTimer = null;
+    }
 
     // Game is over — remove from ActiveGame immediately so it won't be
     // restored on the next server restart.
